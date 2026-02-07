@@ -1,0 +1,5 @@
+description: Cirque Pinnacle 1CA027 ASIC trackpad connected through SPI
+
+compatible: "cirque,pinnacle2"
+
+include: ["spi-device.yaml", "cirque,pinnacle-common.yaml"]

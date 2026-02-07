@@ -1,0 +1,17 @@
+config INPUT_PINNACLE2
+	bool "Cirque Pinnacle 1CA027 Touch Controller Based Device"
+	default y
+	depends on DT_HAS_CIRQUE_PINNACLE2_ENABLED
+	select GPIO
+	select I2C if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE2),i2c)
+ 	select SPI if $(dt_compat_on_bus,$(DT_COMPAT_CIRQUE_PINNACLE2),spi)
+	help
+	  Enable driver for Cirque Pinnacle 1CA027 tracked input device.
+
+if INPUT_PINNACLE2
+
+config INPUT_PINNACLE_INIT_PRIORITY
+    int "Cirque Pinnacle initialization priority"
+    default INPUT_INIT_PRIORITY
+
+endif
