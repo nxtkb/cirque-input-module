@@ -6,8 +6,6 @@ A high-performance **Zephyr Module** providing a specialized driver for the **Ci
 > This repository is **forked from [petejohanson/cirque-input-module](https://github.com/petejohanson/cirque-input-module)**. 
 > We have extended the original driver to include integrated gesture recognition for a more seamless keyboard-integrated mousing experience.
 
-
-
 ---
 
 ## ✨ Key Features: Integrated Gestures
@@ -15,10 +13,12 @@ A high-performance **Zephyr Module** providing a specialized driver for the **Ci
 This module features **on-device gesture recognition**, allowing you to perform common mouse operations directly on your trackpad without needing additional key layers:
 
 * **🖱️ Cursor Movement:** Smooth, high-resolution tracking with a single finger.
-* **左键单击 (Left Click):** Single tap anywhere on the trackpad surface.
-* **双击 (Double Click):** Rapid double tap to open files or select text.
-* **右键单击 (Right Click):** Tap the **bottom-right corner (5 o'clock position)** to trigger the context menu.
-* **垂直滚动 (Vertical Scroll):** Slide along the **right edge** of the trackpad for fluid, silk-smooth page scrolling.
+* **Left Click:** Single tap anywhere on the trackpad surface.
+* **Double Click:** Rapid double tap to open files or select text.
+* **Right Click:** Tap the **bottom-right corner (5 o'clock position)** to trigger the context menu.
+* **Vertical Scroll:** Slide along the **right edge** of the trackpad for fluid, silk-smooth page scrolling.
+
+![触控板](images/cirque.png)
 
 ---
 
