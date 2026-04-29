@@ -1,0 +1,21 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Conditional drag-scroll input processor
+
+compatible: "zmk,input-processor-drag-scroll"
+
+include: ip_two_param.yaml
+
+properties:
+  track-remainders:
+    type: boolean
+  speed-multipliers:
+    type: array
+    default: [1, 1, 1]
+  speed-divisors:
+    type: array
+    default: [12, 8, 4]
+  initial-speed-index:
+    type: int
+    default: 1

@@ -452,6 +452,26 @@ static int pinnacle_sample_fetch(const struct device *dev, union pinnacle_sample
 	return 0;
 }
 
+static bool pinnacle_report_button_if_changed(const struct device *dev, uint16_t code,
+					      bool current, bool *previous, bool sync)
+{
+	if (current == *previous) {
+		return false;
+	}
+
+	*previous = current;
+	input_report_key(dev, code, current, sync, K_FOREVER);
+	return true;
+}
+
+static bool pinnacle_buttons_changed(const struct pinnacle_data *data,
+				     const union pinnacle_sample *sample)
+{
+	return sample->btn_primary != data->btn_primary ||
+	       sample->btn_secondary != data->btn_secondary ||
+	       sample->btn_aux != data->btn_aux;
+}
+
 static int pinnacle_handle_interrupt(const struct device *dev)
 {
 	const struct pinnacle_config *config = dev->config;
@@ -467,23 +487,30 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 	}
 
 	if (config->relative_mode) {
+		bool buttons_changed =
+			config->primary_tap_enabled && pinnacle_buttons_changed(drv_data, sample);
+
 		if (sample->wheelCount != 0) {
 			LOG_ERR("Wheel Count: %d", sample->wheelCount);
 			input_report_rel(dev, INPUT_REL_WHEEL, sample->wheelCount, true, K_FOREVER);
 		} else {
 			input_report_rel(dev, INPUT_REL_X, sample->rel_x, false, K_FOREVER);
-			input_report_rel(dev, INPUT_REL_Y, sample->rel_y, !config->primary_tap_enabled,
-					K_FOREVER);
+			input_report_rel(dev, INPUT_REL_Y, sample->rel_y, !buttons_changed, K_FOREVER);
 		}
 		if (config->primary_tap_enabled) {
-			// Report all buttons for trackpad devices
-			input_report_key(dev, INPUT_BTN_0, sample->btn_primary, false,
-					 K_FOREVER);
-			input_report_key(dev, INPUT_BTN_0+1, sample->btn_secondary, false,
-					 K_FOREVER);
-			// Optional third button (middle/auxiliary) - can be enabled via configuration
-			input_report_key(dev, INPUT_BTN_0+2, sample->btn_aux, true,
-					 K_FOREVER);
+			bool secondary_changed = sample->btn_secondary != drv_data->btn_secondary;
+
+			pinnacle_report_button_if_changed(dev, INPUT_BTN_0, sample->btn_primary,
+							  &drv_data->btn_primary,
+							  buttons_changed && !secondary_changed &&
+								  sample->btn_aux == drv_data->btn_aux);
+			pinnacle_report_button_if_changed(dev, INPUT_BTN_0 + 1,
+							  sample->btn_secondary,
+							  &drv_data->btn_secondary,
+							  buttons_changed &&
+								  sample->btn_aux == drv_data->btn_aux);
+			pinnacle_report_button_if_changed(dev, INPUT_BTN_0 + 2, sample->btn_aux,
+							  &drv_data->btn_aux, buttons_changed);
 		}
 	} else {
 		if (config->clipping_enabled && !pinnacle_is_idle_sample(sample)) {

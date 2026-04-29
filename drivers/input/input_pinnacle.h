@@ -197,4 +197,7 @@ struct pinnacle_data {
 	const struct device *dev;
 	struct gpio_callback dr_cb_data;
 	struct k_work work;
+	bool btn_primary;
+	bool btn_secondary;
+	bool btn_aux;
 };

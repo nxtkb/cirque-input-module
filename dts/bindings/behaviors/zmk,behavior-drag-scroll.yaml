@@ -1,0 +1,8 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Drag Scroll Behavior
+
+compatible: "zmk,behavior-drag-scroll"
+
+include: zero_param.yaml

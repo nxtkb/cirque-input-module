@@ -1,0 +1,12 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Runtime pointing speed adjustment behavior
+
+compatible: "zmk,behavior-pointing-speed"
+
+include: two_param.yaml
+
+properties:
+  "#binding-cells":
+    const: 2
