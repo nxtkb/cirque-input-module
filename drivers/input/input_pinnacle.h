@@ -173,6 +173,7 @@ struct pinnacle_config {
 	uint16_t startup_delay_ms;
 	uint16_t absolute_relative_multiplier;
 	uint16_t absolute_relative_divisor;
+	uint8_t absolute_touch_min_z;
 	uint16_t absolute_tap_max_ms;
 	uint16_t absolute_tap_max_movement;
 	uint16_t absolute_tap_click_ms;
@@ -243,6 +244,7 @@ struct pinnacle_data {
 	enum pinnacle_absolute_scroll_mode scroll_mode;
 	bool touching;
 	bool tap_dragging;
+	bool relative_mode;
 	const struct device *dev;
 	struct gpio_callback dr_cb_data;
 	struct k_work work;

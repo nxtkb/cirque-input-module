@@ -19,8 +19,8 @@ absolute-coordinate processing, or ZMK input processors.
 - Primary click from tap.
 - Scroll from either native edge wheel, software edge zones, or hold-to-scroll.
 - Extended dragging / repositioning behavior, either ASIC-provided or driver-side.
-- Hold-to-snipe behavior: hold a key and move the touchpad with reduced pointer speed.
 - Runtime pointer and scroll speed adjustment.
+- Runtime switching between Cirque relative and absolute data modes.
 - User-defined speed tables with any number of speed levels.
 
 ## ZMK Build Setup
@@ -80,6 +80,7 @@ Use `cirque,pinnacle2` for the trackpad node:
         sensitivity = "2x";
         data-mode = "relative"; /* or "absolute" for driver-side delta tracking */
         absolute-relative-divisor = <8>;
+        absolute-touch-min-z = <1>;
         primary-tap-enable;
         sleep-mode-enable;
         invert-y;
@@ -108,7 +109,7 @@ data-mode = "absolute";
 | Secondary / auxiliary tap | Firmware tap button bits can expose secondary and auxiliary buttons. | Driver classifies configurable absolute tap zones, lower-right as secondary and optional upper-left as auxiliary. | Supported when the zone width/height properties are non-zero. |
 | Edge scroll | Firmware emits native wheel packets from the right edge. | Driver can lock a touch-start edge zone and convert movement to wheel events: right edge for vertical scroll, top edge for horizontal scroll. | Supported with `absolute-right-edge-scroll-enable` / `absolute-top-edge-scroll-enable`. |
 | Hold-to-scroll | ZMK processor converts pointer deltas to wheel events while drag-scroll is enabled. | Same, because absolute mode still emits `REL_X/Y`. | Supported. |
-| Sniping / pointer speed | ZMK processor scales `REL_X/Y`. | Same, because absolute mode still emits `REL_X/Y`. | Supported. |
+| Pointer speed | ZMK processor scales `REL_X/Y`. | Same, because absolute mode still emits `REL_X/Y`. | Supported. |
 | Edge auto-pan / continued motion | ASIC GlideExtend can continue motion after lift-and-reposition gestures. | Driver can emit continued pointer motion while a finger is held in an edge zone. | Supported with `absolute-edge-motion-enable`. |
 | Axis transform | `invert-x`, `invert-y`, and `swap-xy` are applied by Pinnacle feed configuration. | Driver applies transforms while converting absolute coordinates to deltas. | `invert-x` and `swap-xy` supported; `invert-y` is intentionally not applied in the current tested orientation. |
 
@@ -161,6 +162,9 @@ Current absolute-mode behavior:
   double-tap-drag text selection / dragging, with
   `absolute-tap-drag-timeout-ms` and `absolute-tap-drag-max-movement` for
   calibration.
+- `absolute-touch-min-z` sets the minimum absolute-mode pressure treated as a
+  real touch. Increase it if very light contact or hover-like samples cause
+  unwanted pointer movement.
 - `absolute-secondary-tap-area-width`, `absolute-secondary-tap-area-height`,
   `absolute-aux-tap-area-width`, and `absolute-aux-tap-area-height` define
   optional corner tap zones. A width or height of 0 disables that zone.
@@ -178,6 +182,10 @@ Current absolute-mode behavior:
   `absolute-scroll-zone` controls the zone width, and
   `absolute-scroll-divisor` controls scroll speed. Tap-drag takes priority over
   edge scrolling so double-tap-drag still selects text / drags objects.
+- `invert-scroll` on the drag-scroll input processor reverses wheel direction
+  for edge scrolling, hold-to-scroll, and native wheel packets. Mouse-key scroll
+  bindings are regular ZMK keymap entries and should be reversed in the keymap
+  if desired.
 
 Absolute mode tradeoffs:
 
@@ -188,12 +196,12 @@ Absolute mode tradeoffs:
 
 ## Behaviors And Processors
 
-Add processors to the ZMK input listener. The recommended order is sniping first,
-then drag-scroll:
+Add processors to the ZMK input listener. The recommended order is pointer-speed
+first, then drag-scroll:
 
 ```dts
 &glidepoint_listener {
-    input-processors = <&sniping_processor 1 4 &drag_scroll_processor 1 8>;
+    input-processors = <&pointer_processor 0 0 &drag_scroll_processor 1 8>;
 };
 ```
 
@@ -201,8 +209,8 @@ Then define the processors and behaviors:
 
 ```dts
 / {
-    sniping_processor: sniping_processor {
-        compatible = "zmk,input-processor-sniping";
+    pointer_processor: pointer_processor {
+        compatible = "zmk,input-processor-pointer-speed";
         #input-processor-cells = <2>;
         track-remainders;
     };
@@ -219,26 +227,30 @@ Then define the processors and behaviors:
             #binding-cells = <0>;
         };
 
-        snipe: sniping {
-            compatible = "zmk,behavior-sniping";
-            #binding-cells = <0>;
-        };
-
         ptr_spd: pointing_speed {
             compatible = "zmk,behavior-pointing-speed";
             #binding-cells = <2>;
+        };
+
+        crq_mode: cirque_mode {
+            compatible = "zmk,behavior-cirque-mode";
+            #binding-cells = <1>;
         };
     };
 };
 ```
 
-The parameters in `&sniping_processor 1 4` are the hold-sniping multiplier and
-divisor. In this example, holding `&snipe` applies an extra `1/4` scale to pointer
-movement.
+The parameters in `&pointer_processor 0 0` are kept for compatibility with the
+processor binding. Runtime pointer speed is controlled by the speed table
+described below.
 
 The parameters in `&drag_scroll_processor 1 8` are kept for compatibility with
 the processor binding. Runtime scroll speed is controlled by the speed table
 described below.
+
+This module no longer provides a separate hold-to-snipe behavior. Fine pointer
+movement is handled by the pointer-speed processor and the `&ptr_spd` runtime
+speed bindings.
 
 ## Hold-To-Scroll
 
@@ -269,35 +281,6 @@ When held, touchpad `REL_X` becomes horizontal wheel and `REL_Y` becomes vertica
 wheel. In relative mode, the native Cirque right-edge wheel output is also
 controlled by the same scroll speed setting.
 
-## Hold-To-Snipe
-
-Bind `&snipe` directly, or use hold-tap for a normal typing key.
-
-Example: tap `C` for `C`, hold `C` for fine pointer movement:
-
-```dts
-snipe_c: sniping_c {
-    compatible = "zmk,behavior-hold-tap";
-    #binding-cells = <2>;
-    flavor = "hold-preferred";
-    tapping-term-ms = <200>;
-    quick-tap-ms = <150>;
-    require-prior-idle-ms = <125>;
-    bindings = <&snipe>, <&kp>;
-};
-```
-
-Use it in the keymap:
-
-```dts
-&snipe_c 0 C
-```
-
-Sniping scales `REL_X/Y` pointer movement. It does not directly scale native
-wheel events. If sniping is placed before drag-scroll, holding both the sniping
-key and the drag-scroll key produces finer drag-scroll because the pointer delta
-is reduced before being converted to wheel movement.
-
 ## Runtime Speed Control
 
 `&ptr_spd` changes the current speed level at runtime:
@@ -320,6 +303,30 @@ Bindings:
 
 The current speed is runtime state only. After reboot, each processor returns to
 its `initial-speed-index`.
+
+## Runtime Data Mode Control
+
+`&crq_mode` switches the Cirque data mode at runtime. `data-mode` in devicetree
+still controls the boot default.
+
+```dts
+#define CIRQUE_MODE_RELATIVE 0
+#define CIRQUE_MODE_ABSOLUTE 1
+#define CIRQUE_MODE_TOGGLE 2
+```
+
+Bindings:
+
+```dts
+&crq_mode CIRQUE_MODE_RELATIVE
+&crq_mode CIRQUE_MODE_ABSOLUTE
+&crq_mode CIRQUE_MODE_TOGGLE
+```
+
+Switching mode reprograms the Pinnacle feed configuration and clears current
+touch state. For the cleanest feel, trigger the behavior while no finger is on
+the touchpad. The behavior applies to every ready `cirque,pinnacle2` device in
+the firmware image.
 
 ## Custom Speed Tables
 
@@ -355,8 +362,8 @@ That gives `1/12`, `1/8`, and `1/4`, starting at the middle level.
 Example with 5 custom pointer levels:
 
 ```dts
-sniping_processor: sniping_processor {
-    compatible = "zmk,input-processor-sniping";
+pointer_processor: pointer_processor {
+    compatible = "zmk,input-processor-pointer-speed";
     #input-processor-cells = <2>;
     track-remainders;
     speed-multipliers = <1 2 1 3 2>;
@@ -371,7 +378,7 @@ The current Sweep-Pro setup uses these conventions:
 
 - `Z`: tap `Z`, hold for drag-scroll.
 - `X`: tap `X`, hold for left click/selection.
-- `C`: tap `C`, hold for sniping/fine pointer movement.
+- `C`: normal typing key.
 - `MOUSE` layer: pointer speed down/up and scroll speed down/up are placed on
   the left side of the third row.
 

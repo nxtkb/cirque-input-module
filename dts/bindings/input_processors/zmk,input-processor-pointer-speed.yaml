@@ -1,9 +1,9 @@
 # Copyright (c) 2026 The ZMK Contributors
 # SPDX-License-Identifier: MIT
 
-description: Conditional sniping input processor
+description: Runtime pointer speed input processor
 
-compatible: "zmk,input-processor-sniping"
+compatible: "zmk,input-processor-pointer-speed"
 
 include: ip_two_param.yaml
 

@@ -33,6 +33,10 @@ properties:
   scroll-inertia-decay-percent:
     type: int
     default: 70
+  invert-scroll:
+    type: boolean
+    description: |
+      Invert wheel and horizontal-wheel events handled by this processor.
   native-wheel-axis:
     type: string
     default: "vertical"

@@ -39,6 +39,7 @@ struct drag_scroll_config {
 	size_t speed_count;
 	uint8_t initial_speed_index;
 	enum native_wheel_axis native_wheel_axis;
+	bool invert_scroll;
 	uint16_t scroll_min_step;
 	uint16_t scroll_max_delta;
 	bool scroll_inertia;
@@ -106,6 +107,11 @@ static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint3
 	}
 
 	return clamp_to_i16(scaled);
+}
+
+static int32_t maybe_invert_scroll(int32_t value, const struct drag_scroll_config *cfg)
+{
+	return cfg->invert_scroll ? -value : value;
 }
 
 static void clear_inertia(struct drag_scroll_data *data)
@@ -220,6 +226,7 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 			cfg->speed_multipliers[speed_index] * NATIVE_WHEEL_SPEED_BOOST;
 		uint32_t native_div = cfg->speed_divisors[speed_index];
 		event->value = scale_scroll_value(event, native_mul, native_div, cfg, state);
+		event->value = maybe_invert_scroll(event->value, cfg);
 		if (event->code == INPUT_REL_HWHEEL) {
 			schedule_inertia(data, event->value, 0);
 		} else {
@@ -235,6 +242,7 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 		uint32_t x_mul = cfg->speed_multipliers[speed_index];
 		uint32_t x_div = cfg->speed_divisors[speed_index];
 		event->value = scale_scroll_value(event, x_mul, x_div, cfg, state);
+		event->value = maybe_invert_scroll(event->value, cfg);
 		schedule_inertia(data, event->value, 0);
 		break;
 	}
@@ -246,6 +254,8 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 		uint32_t y_mul = cfg->speed_multipliers[speed_index];
 		uint32_t y_div = cfg->speed_divisors[speed_index];
 		event->value = scale_scroll_value(event, y_mul, y_div, cfg, state);
+		event->value = -event->value;
+		event->value = maybe_invert_scroll(event->value, cfg);
 		schedule_inertia(data, 0, event->value);
 		break;
 	}
@@ -289,6 +299,7 @@ static int drag_scroll_init(const struct device *dev)
 		.speed_count = DT_INST_PROP_LEN(n, speed_multipliers),                             \
 		.initial_speed_index = DT_INST_PROP(n, initial_speed_index),                       \
 		.native_wheel_axis = DT_INST_ENUM_IDX(n, native_wheel_axis),                       \
+		.invert_scroll = DT_INST_PROP(n, invert_scroll),                                   \
 		.scroll_min_step = DT_INST_PROP(n, scroll_min_step),                               \
 		.scroll_max_delta = DT_INST_PROP(n, scroll_max_delta),                             \
 		.scroll_inertia = DT_INST_PROP(n, scroll_inertia),                                 \

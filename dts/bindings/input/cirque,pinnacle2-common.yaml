@@ -64,6 +64,14 @@ properties:
       relative pointer movement. Used only when data-mode is "absolute".
       Increase this value to make absolute-mode pointer movement slower.
 
+  absolute-touch-min-z:
+    type: int
+    default: 1
+    description: |
+      Minimum absolute-mode Z pressure required to treat a sample as touching.
+      Samples below this value are handled as no-touch. Increase this value to
+      reduce hover or very light touch movement.
+
   absolute-tap-max-ms:
     type: int
     default: 250
@@ -196,6 +204,13 @@ properties:
     description: |
       Coordinate delta divisor used when converting absolute edge movement to
       wheel ticks. Increase this value to make edge scrolling slower.
+
+  glide-extend-enable:
+    type: boolean
+    description: |
+      In the relative mode enable Cirque GlideExtend, allowing drag motion to
+      continue after reaching a pad edge by lifting and repositioning the
+      finger.
 
   sleep-mode-enable:
     type: boolean

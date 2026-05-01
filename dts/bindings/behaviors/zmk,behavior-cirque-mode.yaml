@@ -1,0 +1,12 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: Runtime Cirque data mode selection behavior
+
+compatible: "zmk,behavior-cirque-mode"
+
+include: one_param.yaml
+
+properties:
+  "#binding-cells":
+    const: 1
