@@ -84,6 +84,8 @@
 #define PINNACLE_PACKET_BYTE0_BTN_PRIMARY  BIT(0)
 #define PINNACLE_PACKET_BYTE0_BTN_SECONDRY BIT(1)
 #define PINNACLE_PACKET_BYTE0_BTN_AUX BIT(2)
+#define PINNACLE_PACKET_BYTE0_X_SIGN BIT(4)
+#define PINNACLE_PACKET_BYTE0_Y_SIGN BIT(5)
 
 /* Extended Register Access Control */
 #define PINNACLE_ERA_CTRL_READ           BIT(0)
@@ -113,6 +115,9 @@
  */
 #define PINNACLE_ERA_AWAIT_DELAY_POLL_US 10000
 #define PINNACLE_ERA_AWAIT_RETRY_COUNT   5
+
+#define PINNACLE_STARTUP_RETRY_DELAY_MS 10
+#define PINNACLE_STARTUP_RETRY_COUNT    20
 
 /* Special definitions */
 #define PINNACLE_SPI_FB 0xFB /* Filler byte */
@@ -151,6 +156,12 @@ enum pinnacle_sensitivity {
 	PINNACLE_SENSITIVITY_X4,
 };
 
+enum pinnacle_absolute_scroll_mode {
+	PINNACLE_ABSOLUTE_SCROLL_NONE,
+	PINNACLE_ABSOLUTE_SCROLL_VERTICAL,
+	PINNACLE_ABSOLUTE_SCROLL_HORIZONTAL,
+};
+
 struct pinnacle_config {
 	const struct pinnacle_bus bus;
 	struct gpio_dt_spec dr_gpio;
@@ -159,12 +170,35 @@ struct pinnacle_config {
 	bool relative_mode;
 	bool sleep_mode_enable;
 	uint8_t idle_packets_count;
+	uint16_t startup_delay_ms;
+	uint16_t absolute_relative_multiplier;
+	uint16_t absolute_relative_divisor;
+	uint16_t absolute_tap_max_ms;
+	uint16_t absolute_tap_max_movement;
+	uint16_t absolute_tap_click_ms;
+	uint16_t absolute_tap_drag_timeout_ms;
+	uint16_t absolute_tap_drag_max_movement;
+	uint16_t absolute_secondary_tap_area_width;
+	uint16_t absolute_secondary_tap_area_height;
+	uint16_t absolute_aux_tap_area_width;
+	uint16_t absolute_aux_tap_area_height;
+	uint16_t absolute_edge_motion_zone;
+	uint16_t absolute_edge_motion_speed;
+	uint16_t absolute_edge_motion_interval_ms;
+	uint16_t absolute_edge_motion_start_ms;
+	uint16_t absolute_scroll_zone;
+	uint16_t absolute_scroll_divisor;
 
 	bool clipping_enabled;
 	bool scaling_enabled;
 	bool invert_x;
 	bool invert_y;
 	bool primary_tap_enabled;
+	bool glide_extend_enabled;
+	bool absolute_tap_drag_enabled;
+	bool absolute_edge_motion_enabled;
+	bool absolute_right_edge_scroll_enabled;
+	bool absolute_top_edge_scroll_enabled;
 	bool swap_xy;
 
 	uint16_t active_range_x_min;
@@ -194,9 +228,25 @@ union pinnacle_sample {
 
 struct pinnacle_data {
 	union pinnacle_sample sample;
+	uint16_t previous_abs_x;
+	uint16_t previous_abs_y;
+	uint16_t touch_start_abs_x;
+	uint16_t touch_start_abs_y;
+	uint16_t touch_current_x;
+	uint16_t touch_current_y;
+	uint16_t last_tap_x;
+	uint16_t last_tap_y;
+	uint16_t last_tap_code;
+	int64_t touch_start_time_ms;
+	int64_t last_tap_time_ms;
+	int32_t scroll_remainder;
+	enum pinnacle_absolute_scroll_mode scroll_mode;
+	bool touching;
+	bool tap_dragging;
 	const struct device *dev;
 	struct gpio_callback dr_cb_data;
 	struct k_work work;
+	struct k_work_delayable edge_motion_work;
 	bool btn_primary;
 	bool btn_secondary;
 	bool btn_aux;

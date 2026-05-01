@@ -19,3 +19,24 @@ properties:
   initial-speed-index:
     type: int
     default: 1
+  scroll-min-step:
+    type: int
+    default: 0
+  scroll-max-delta:
+    type: int
+    default: 0
+  scroll-inertia:
+    type: boolean
+  scroll-inertia-interval-ms:
+    type: int
+    default: 16
+  scroll-inertia-decay-percent:
+    type: int
+    default: 70
+  native-wheel-axis:
+    type: string
+    default: "vertical"
+    enum:
+      - "vertical"
+      - "horizontal"
+      - "horizontal-when-enabled"

@@ -4,6 +4,10 @@ This note summarizes the Cirque Pinnacle data output controls from the
 technical documentation and maps them to this driver's Zephyr devicetree
 properties.
 
+Related interface details such as RAP, I2C/SPI transactions, `HW_DR`, startup,
+and Extended Register Access are covered in
+[pinnacle-interface.md](pinnacle-interface.md).
+
 ## Data Feed
 
 Pinnacle starts finger tracking, sampling, and reporting only after the data
@@ -61,8 +65,9 @@ axis inversion.
 Notes:
 
 - The datasheet describes X/Y inversion as an absolute-mode feature. The
-  current driver writes the same hardware bits for both relative and absolute
-  mode because they work in relative mode on the supported hardware.
+  current driver writes hardware inversion bits only in relative mode. In
+  absolute mode, orientation is handled in software while converting coordinate
+  deltas to ZMK relative pointer events.
 - Disabling either axis prevents normal tracking and is not recommended for
   regular applications.
 - The hardware filter is enabled by default. Cirque does not recommend
@@ -99,9 +104,19 @@ The driver programs these registers during `pinnacle_init()`:
 
 | Mode | `FeedConfig2` behavior | `FeedConfig1` behavior |
 | --- | --- | --- |
-| Relative | Disables GlideExtend, enables Intellimouse, optionally swaps X/Y, and disables all taps unless `primary-tap-enable` is set. | Enables feed, keeps relative mode selected, and applies `invert-x`/`invert-y` if configured. |
-| Absolute | Disables GlideExtend, scroll, and all taps. | Enables feed, selects absolute mode, and applies `invert-x`/`invert-y` if configured. |
+| Relative | Enables Intellimouse, optionally disables GlideExtend, optionally swaps X/Y, and disables all taps unless `primary-tap-enable` is set. | Enables feed, keeps relative mode selected, and applies hardware `invert-x`/`invert-y` if configured. |
+| Absolute | Disables GlideExtend, scroll, and all taps. | Enables feed and selects absolute mode. Software conversion currently applies `swap-xy` and `invert-x` to deltas; `invert-y` is not applied in the current tested orientation. |
 
 Relative mode reads four packet bytes so the driver can report wheel count
-when Intellimouse mode is enabled.
+when Intellimouse mode is enabled. Absolute mode reads absolute coordinate
+packets, treats the first touch as a baseline, applies software orientation
+while differencing coordinates, and reports later coordinate deltas as
+`REL_X/Y` so existing ZMK pointer processors continue to work.
 
+When relative mode and `primary-tap-enable` are both enabled, the driver writes
+at least one Z-idle packet even if `idle-packets-count` is `0`. This gives the
+driver a no-touch packet after tap-drag so it can report the primary button
+release when the finger lifts. The driver also forces at least one idle packet
+in absolute mode so the next touch after lifting starts a fresh baseline. In
+absolute mode, `primary-tap-enable` enables a small software tap detector because
+the absolute packet path does not carry firmware button bits.

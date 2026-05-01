@@ -19,3 +19,21 @@ properties:
   initial-speed-index:
     type: int
     default: 1
+  pointer-curve:
+    type: string
+    default: "linear"
+    enum:
+      - "linear"
+      - "adaptive"
+  pointer-curve-deadzone:
+    type: int
+    default: 2
+  pointer-curve-accel-multiplier:
+    type: int
+    default: 1
+  pointer-curve-accel-divisor:
+    type: int
+    default: 12
+  pointer-curve-max-delta:
+    type: int
+    default: 120

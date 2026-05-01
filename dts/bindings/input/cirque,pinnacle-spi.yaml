@@ -3,3 +3,169 @@ description: Cirque Pinnacle 1CA027 ASIC trackpad connected through SPI
 compatible: "cirque,pinnacle2"
 
 include: ["spi-device.yaml", "cirque,pinnacle-common.yaml"]
+
+properties:
+  startup-delay-ms:
+    type: int
+    default: 0
+    description: |
+      Delay initialization by this many milliseconds after the application
+      starts. This can help when the MCU resets without power-cycling the
+      Pinnacle controller, such as after a bootloader firmware update.
+
+  absolute-relative-multiplier:
+    type: int
+    default: 1
+    description: |
+      Multiplier applied when converting absolute-mode coordinate deltas to
+      relative pointer movement. Used only when data-mode is "absolute".
+
+  absolute-relative-divisor:
+    type: int
+    default: 8
+    description: |
+      Divisor applied when converting absolute-mode coordinate deltas to
+      relative pointer movement. Used only when data-mode is "absolute".
+      Increase this value to make absolute-mode pointer movement slower.
+
+
+  absolute-tap-max-ms:
+    type: int
+    default: 250
+    description: |
+      Maximum touch duration in milliseconds for software tap detection in
+      absolute mode. Used only when data-mode is "absolute" and
+      primary-tap-enable is set.
+
+  absolute-tap-max-movement:
+    type: int
+    default: 80
+    description: |
+      Maximum absolute-coordinate movement allowed for software tap detection
+      in absolute mode. Used only when data-mode is "absolute" and
+      primary-tap-enable is set.
+
+  absolute-tap-click-ms:
+    type: int
+    default: 30
+    description: |
+      Duration in milliseconds to hold the generated mouse button down for
+      software taps in absolute mode. Very short press/release pulses can be
+      missed by the host or split transport.
+
+  absolute-tap-drag-enable:
+    type: boolean
+    description: |
+      Enable tap-drag in absolute mode. After a primary tap, a second nearby
+      touch within the timeout holds the primary mouse button until lift,
+      allowing text selection and dragging without a physical mouse button.
+
+  absolute-tap-drag-timeout-ms:
+    type: int
+    default: 300
+    description: |
+      Maximum delay between a primary tap release and the second touch that
+      starts tap-drag.
+
+  absolute-tap-drag-max-movement:
+    type: int
+    default: 160
+    description: |
+      Maximum coordinate distance between the primary tap and the second touch
+      that starts tap-drag.
+
+  absolute-secondary-tap-area-width:
+    type: int
+    default: 0
+    description: |
+      Width of the lower-right software secondary-tap area in absolute
+      coordinates. Set to 0 to disable secondary tap detection.
+
+  absolute-secondary-tap-area-height:
+    type: int
+    default: 0
+    description: |
+      Height of the lower-right software secondary-tap area in absolute
+      coordinates. Set to 0 to disable secondary tap detection.
+
+  absolute-aux-tap-area-width:
+    type: int
+    default: 0
+    description: |
+      Width of the upper-left software auxiliary-tap area in absolute
+      coordinates. Set to 0 to disable auxiliary tap detection.
+
+  absolute-aux-tap-area-height:
+    type: int
+    default: 0
+    description: |
+      Height of the upper-left software auxiliary-tap area in absolute
+      coordinates. Set to 0 to disable auxiliary tap detection.
+
+  absolute-edge-motion-enable:
+    type: boolean
+    description: |
+      In absolute mode, continue emitting pointer motion while the finger is
+      held in an edge zone. This implements touchpad-style edge auto-pan
+      without requiring lift-and-reposition GlideExtend behavior.
+
+  absolute-edge-motion-zone:
+    type: int
+    default: 120
+    description: |
+      Width of each edge zone, in absolute coordinates, used by absolute edge
+      motion. Set to 0 to disable edge zones.
+
+  absolute-edge-motion-speed:
+    type: int
+    default: 4
+    description: |
+      Relative movement units emitted on each edge-motion tick.
+
+  absolute-edge-motion-interval-ms:
+    type: int
+    default: 10
+    description: |
+      Interval in milliseconds between edge-motion ticks.
+
+  absolute-edge-motion-start-ms:
+    type: int
+    default: 120
+    description: |
+      Delay in milliseconds after touch start before edge motion begins. This
+      avoids triggering edge motion from short taps near the edge.
+
+
+  absolute-right-edge-scroll-enable:
+    type: boolean
+    description: |
+      In absolute mode, start vertical scrolling when a touch begins in the
+      logical right edge zone. The scroll mode remains locked until lift.
+
+  absolute-top-edge-scroll-enable:
+    type: boolean
+    description: |
+      In absolute mode, start horizontal scrolling when a touch begins in the
+      logical top edge zone. The scroll mode remains locked until lift.
+
+  absolute-scroll-zone:
+    type: int
+    default: 120
+    description: |
+      Width of the edge-scroll zones, in logical absolute coordinates. The
+      logical coordinates include the same swap/invert transform used for
+      absolute-mode pointer movement.
+
+  absolute-scroll-divisor:
+    type: int
+    default: 80
+    description: |
+      Coordinate delta divisor used when converting absolute edge movement to
+      wheel ticks. Increase this value to make edge scrolling slower.
+
+  glide-extend-enable:
+    type: boolean
+    description: |
+      In the relative mode enable Cirque GlideExtend, allowing drag motion to
+      continue after reaching a pad edge by lifting and repositioning the
+      finger.

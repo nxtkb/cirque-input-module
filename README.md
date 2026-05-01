@@ -11,10 +11,14 @@ and extended for split-keyboard trackpad use.
 
 ## Features
 
-- Cursor movement from the Cirque touchpad.
-- Primary/secondary/aux button reporting from firmware taps.
-- Right-edge vertical scroll from the Cirque native wheel output.
-- Hold-to-drag-scroll behavior: hold a key and move the touchpad to scroll.
+This module describes features by the user-facing pointing behavior first. The
+underlying implementation can be firmware-relative packets, driver-side
+absolute-coordinate processing, or ZMK input processors.
+
+- Pointer movement from the Cirque touchpad.
+- Primary click from tap.
+- Scroll from either native edge wheel, software edge zones, or hold-to-scroll.
+- Extended dragging / repositioning behavior, either ASIC-provided or driver-side.
 - Hold-to-snipe behavior: hold a key and move the touchpad with reduced pointer speed.
 - Runtime pointer and scroll speed adjustment.
 - User-defined speed tables with any number of speed levels.
@@ -74,13 +78,113 @@ Use `cirque,pinnacle2` for the trackpad node:
         status = "okay";
         data-ready-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
         sensitivity = "2x";
-        data-mode = "relative";
+        data-mode = "relative"; /* or "absolute" for driver-side delta tracking */
+        absolute-relative-divisor = <8>;
         primary-tap-enable;
         sleep-mode-enable;
         invert-y;
     };
 };
 ```
+
+## Data Modes
+
+`data-mode` chooses how the driver receives raw data from the Pinnacle ASIC. It
+should not be read as the final user feature set. The same user-facing feature
+can often be implemented in either mode with different tradeoffs.
+
+```dts
+data-mode = "relative";
+/* or */
+data-mode = "absolute";
+```
+
+### User-Facing Feature Map
+
+| Feature | Relative mode implementation | Absolute mode implementation | Current absolute support |
+| --- | --- | --- | --- |
+| Pointer movement | Firmware emits `REL_X/Y` packets. | Driver reads absolute coordinates and emits coordinate deltas as `REL_X/Y`. | Supported. |
+| Primary tap / click | Firmware tap button bits are forwarded as `INPUT_BTN_0`. | Driver detects short, low-movement touches and emits `INPUT_BTN_0`; optional tap-drag holds the primary button on the second touch. | Supported. |
+| Secondary / auxiliary tap | Firmware tap button bits can expose secondary and auxiliary buttons. | Driver classifies configurable absolute tap zones, lower-right as secondary and optional upper-left as auxiliary. | Supported when the zone width/height properties are non-zero. |
+| Edge scroll | Firmware emits native wheel packets from the right edge. | Driver can lock a touch-start edge zone and convert movement to wheel events: right edge for vertical scroll, top edge for horizontal scroll. | Supported with `absolute-right-edge-scroll-enable` / `absolute-top-edge-scroll-enable`. |
+| Hold-to-scroll | ZMK processor converts pointer deltas to wheel events while drag-scroll is enabled. | Same, because absolute mode still emits `REL_X/Y`. | Supported. |
+| Sniping / pointer speed | ZMK processor scales `REL_X/Y`. | Same, because absolute mode still emits `REL_X/Y`. | Supported. |
+| Edge auto-pan / continued motion | ASIC GlideExtend can continue motion after lift-and-reposition gestures. | Driver can emit continued pointer motion while a finger is held in an edge zone. | Supported with `absolute-edge-motion-enable`. |
+| Axis transform | `invert-x`, `invert-y`, and `swap-xy` are applied by Pinnacle feed configuration. | Driver applies transforms while converting absolute coordinates to deltas. | `invert-x` and `swap-xy` supported; `invert-y` is intentionally not applied in the current tested orientation. |
+
+### Relative Mode
+
+`data-mode = "relative"` asks the Pinnacle firmware to produce mouse-like
+relative packets. This is closest to the ASIC's stock behavior. The driver
+mostly forwards firmware-generated motion, wheel, and button state into ZMK
+input events.
+
+Relative mode is useful when:
+
+- You want native right-edge wheel behavior.
+- You want firmware-provided tap buttons, including secondary / auxiliary tap.
+- You want to compare against the ASIC's stock relative behavior.
+- You want to use the ASIC GlideExtend implementation.
+
+Relative mode tradeoffs:
+
+- Gesture thresholds such as GlideExtend edge detection are controlled inside
+  the ASIC and are not very tunable from the driver.
+- The driver receives deltas, not full contact position, so software gestures
+  based on absolute location are limited.
+
+### Absolute Mode
+
+`data-mode = "absolute"` asks the Pinnacle firmware for absolute coordinates.
+The driver then builds mouse-like behavior in software and still emits `REL_X/Y`
+so existing ZMK processors keep working.
+
+Absolute mode is useful when:
+
+- You want driver-side control over gesture thresholds and edge zones.
+- You want to experiment with software GlideExtend or other touchpad gestures.
+- You want features to be expressed as user-facing behavior instead of relying
+  on the ASIC's relative-mode state machine.
+
+Current absolute-mode behavior:
+
+- The first touch establishes a baseline. Later packets become `REL_X/Y`
+  pointer deltas until the finger lifts.
+- A forced idle packet after lift resets the baseline and avoids jumps between
+  strokes.
+- `primary-tap-enable` enables software tap detection. By default it emits
+  `INPUT_BTN_0`; configured lower-right and optional upper-left zones can emit
+  secondary and auxiliary button events.
+- `absolute-tap-max-ms` and `absolute-tap-max-movement` tune software tap
+  recognition. `absolute-tap-click-ms` controls how long the generated mouse
+  button is held before release. `absolute-tap-drag-enable` enables
+  double-tap-drag text selection / dragging, with
+  `absolute-tap-drag-timeout-ms` and `absolute-tap-drag-max-movement` for
+  calibration.
+- `absolute-secondary-tap-area-width`, `absolute-secondary-tap-area-height`,
+  `absolute-aux-tap-area-width`, and `absolute-aux-tap-area-height` define
+  optional corner tap zones. A width or height of 0 disables that zone.
+- `absolute-relative-multiplier` and `absolute-relative-divisor` tune cursor
+  scale. Increase the divisor for slower movement; decrease it for faster
+  movement.
+- `absolute-edge-motion-enable` enables touchpad-style edge auto-pan: holding a
+  finger in an edge zone keeps emitting pointer motion until the finger leaves
+  the zone or lifts. `absolute-edge-motion-zone`, `absolute-edge-motion-speed`,
+  `absolute-edge-motion-interval-ms`, and `absolute-edge-motion-start-ms` tune
+  the behavior.
+- `absolute-right-edge-scroll-enable` locks a touch that starts in the logical
+  right edge zone into vertical scrolling. `absolute-top-edge-scroll-enable`
+  does the same for horizontal scrolling from the logical top edge.
+  `absolute-scroll-zone` controls the zone width, and
+  `absolute-scroll-divisor` controls scroll speed. Tap-drag takes priority over
+  edge scrolling so double-tap-drag still selects text / drags objects.
+
+Absolute mode tradeoffs:
+
+- Firmware-only features such as native wheel packets and firmware secondary /
+  auxiliary tap bits are not available directly. They need software equivalents.
+- Software equivalents can be more tunable, but they must be implemented and
+  calibrated in the driver.
 
 ## Behaviors And Processors
 
@@ -162,8 +266,8 @@ Use it in the keymap:
 ```
 
 When held, touchpad `REL_X` becomes horizontal wheel and `REL_Y` becomes vertical
-wheel. The native Cirque right-edge wheel output is also controlled by the same
-scroll speed setting.
+wheel. In relative mode, the native Cirque right-edge wheel output is also
+controlled by the same scroll speed setting.
 
 ## Hold-To-Snipe
 
@@ -273,11 +377,11 @@ The current Sweep-Pro setup uses these conventions:
 
 ## Notes
 
-- Native right-edge scrolling is generated by the Cirque firmware as
-  `INPUT_REL_WHEEL`.
-- Native wheel events are speed-controlled by `drag_scroll_processor`.
-- Native wheel events receive a fixed compensation before the scroll speed table
-  is applied so the right-edge scroll speed is close to hold-to-scroll speed.
+- Relative-mode native right-edge scrolling is generated by the Cirque firmware
+  as `INPUT_REL_WHEEL`.
+- Relative-mode native wheel events are speed-controlled by `drag_scroll_processor`.
+- Relative-mode native wheel events receive a fixed compensation before the scroll
+  speed table is applied so the right-edge scroll speed is close to hold-to-scroll speed.
 - Button events are reported only on button-state changes, so a keyboard-held
   mouse button is not released by normal touchpad movement.
 
@@ -291,6 +395,8 @@ The current Sweep-Pro setup uses these conventions:
 
 - ZMK pointing documentation:
   <https://zmk.dev/docs/development/hardware-integration/pointing>
+- Cirque Pinnacle interface and register-access notes:
+  [docs/pinnacle-interface.md](docs/pinnacle-interface.md)
 - Cirque Pinnacle data output notes:
   [docs/pinnacle-data-output.md](docs/pinnacle-data-output.md)
 
