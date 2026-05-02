@@ -42,6 +42,9 @@ struct drag_scroll_config {
 	bool invert_scroll;
 	uint16_t scroll_min_step;
 	uint16_t scroll_max_delta;
+	uint16_t scroll_curve_deadzone;
+	uint16_t scroll_curve_accel_multiplier;
+	uint16_t scroll_curve_accel_divisor;
 	bool scroll_inertia;
 	uint16_t scroll_inertia_interval_ms;
 	uint8_t scroll_inertia_decay_percent;
@@ -71,6 +74,31 @@ static int32_t clamp_to_i16(int64_t value)
 
 static int64_t abs64(int64_t value) { return value < 0 ? -value : value; }
 
+static int64_t apply_scroll_curve(int64_t value, const struct drag_scroll_config *cfg)
+{
+	if (value == 0 || cfg->scroll_curve_accel_multiplier == 0) {
+		return value;
+	}
+
+	int64_t magnitude = abs64(value);
+
+	if (magnitude <= cfg->scroll_curve_deadzone) {
+		return value;
+	}
+
+	uint16_t accel_divisor = cfg->scroll_curve_accel_divisor;
+	if (accel_divisor == 0) {
+		accel_divisor = 1;
+	}
+
+	int64_t over_deadzone = magnitude - cfg->scroll_curve_deadzone;
+	int64_t accelerated =
+		magnitude + (over_deadzone * over_deadzone * cfg->scroll_curve_accel_multiplier) /
+				    accel_divisor;
+
+	return value < 0 ? -accelerated : accelerated;
+}
+
 static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint32_t div,
 				  const struct drag_scroll_config *cfg,
 				  struct zmk_input_processor_state *state)
@@ -85,7 +113,8 @@ static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint3
 		value_mul += *state->remainder;
 	}
 
-	int64_t scaled = value_mul / (int64_t)div;
+	int64_t linear_scaled = value_mul / (int64_t)div;
+	int64_t scaled = apply_scroll_curve(linear_scaled, cfg);
 
 	if (cfg->scroll_min_step > 0 && abs64(scaled) < cfg->scroll_min_step) {
 		if (state != NULL && state->remainder != NULL) {
@@ -103,7 +132,7 @@ static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint3
 	}
 
 	if (state != NULL && state->remainder != NULL) {
-		*state->remainder = clamp_to_i16(value_mul - (scaled * (int64_t)div));
+		*state->remainder = clamp_to_i16(value_mul - (linear_scaled * (int64_t)div));
 	}
 
 	return clamp_to_i16(scaled);
@@ -280,6 +309,7 @@ static int drag_scroll_init(const struct device *dev)
 	k_work_init_delayable(&data->inertia_work, inertia_work_cb);
 #endif
 
+	zmk_pointing_speed_set_count(ZMK_POINTING_SPEED_TARGET_SCROLL, cfg->speed_count);
 	zmk_pointing_speed_set_initial_index(ZMK_POINTING_SPEED_TARGET_SCROLL,
 					     cfg->initial_speed_index);
 	return 0;
@@ -302,6 +332,10 @@ static int drag_scroll_init(const struct device *dev)
 		.invert_scroll = DT_INST_PROP(n, invert_scroll),                                   \
 		.scroll_min_step = DT_INST_PROP(n, scroll_min_step),                               \
 		.scroll_max_delta = DT_INST_PROP(n, scroll_max_delta),                             \
+		.scroll_curve_deadzone = DT_INST_PROP(n, scroll_curve_deadzone),                   \
+		.scroll_curve_accel_multiplier =                                                   \
+			DT_INST_PROP(n, scroll_curve_accel_multiplier),                            \
+		.scroll_curve_accel_divisor = DT_INST_PROP(n, scroll_curve_accel_divisor),         \
 		.scroll_inertia = DT_INST_PROP(n, scroll_inertia),                                 \
 		.scroll_inertia_interval_ms = DT_INST_PROP(n, scroll_inertia_interval_ms),         \
 		.scroll_inertia_decay_percent = DT_INST_PROP(n, scroll_inertia_decay_percent),     \

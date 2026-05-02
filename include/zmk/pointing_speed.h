@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 enum zmk_pointing_speed_target {
@@ -13,6 +14,7 @@ enum zmk_pointing_speed_action {
 };
 
 uint8_t zmk_pointing_speed_get_index(enum zmk_pointing_speed_target target);
+void zmk_pointing_speed_set_count(enum zmk_pointing_speed_target target, size_t count);
 void zmk_pointing_speed_set_initial_index(enum zmk_pointing_speed_target target, uint8_t index);
 void zmk_pointing_speed_adjust(enum zmk_pointing_speed_target target,
 			       enum zmk_pointing_speed_action action);

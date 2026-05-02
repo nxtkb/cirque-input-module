@@ -118,6 +118,8 @@
 
 #define PINNACLE_STARTUP_RETRY_DELAY_MS 10
 #define PINNACLE_STARTUP_RETRY_COUNT    20
+#define PINNACLE_INIT_RETRY_DELAY_MS    100
+#define PINNACLE_INIT_RETRY_COUNT       3
 
 /* Special definitions */
 #define PINNACLE_SPI_FB 0xFB /* Filler byte */

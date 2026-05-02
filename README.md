@@ -301,8 +301,11 @@ Bindings:
 &ptr_spd SPEED_SCROLL SPEED_NEXT
 ```
 
-The current speed is runtime state only. After reboot, each processor returns to
-its `initial-speed-index`.
+When settings are enabled, the current pointer and scroll speed indexes are
+saved after each `&ptr_spd` adjustment and restored after reboot. If no saved
+setting exists, each processor starts from its `initial-speed-index`. Saved or
+configured indexes that are larger than the current table are clamped to the
+last valid level, and runtime adjustments wrap within the current table.
 
 ## Runtime Data Mode Control
 
@@ -328,6 +331,10 @@ touch state. For the cleanest feel, trigger the behavior while no finger is on
 the touchpad. The behavior applies to every ready `cirque,pinnacle2` device in
 the firmware image.
 
+When settings are enabled, the selected relative / absolute mode is saved after
+runtime changes and restored after reboot. `data-mode` in devicetree remains the
+fallback used when no saved setting exists.
+
 ## Custom Speed Tables
 
 Both processors support speed tables:
@@ -338,6 +345,19 @@ Both processors support speed tables:
 
 The multiplier and divisor arrays must have the same length. That length is the
 number of speed levels. Any number of levels is allowed.
+
+For the exact pointer, hold-to-scroll, native wheel, and absolute-mode edge
+scroll formulas, see
+[Pointer And Scroll Speed Calculation](docs/speed-calculation.md).
+
+Scroll also applies a small acceleration curve after the speed table. The
+default curve leaves small deltas unchanged and boosts larger deltas:
+
+```dts
+scroll-curve-deadzone = <2>;
+scroll-curve-accel-multiplier = <1>;
+scroll-curve-accel-divisor = <16>;
+```
 
 Pointer speed defaults to 3 levels:
 
@@ -352,12 +372,12 @@ That gives `1/2`, `1/1`, and `3/2`, starting at the middle level.
 Scroll speed defaults to 3 levels:
 
 ```dts
-speed-multipliers = <1 1 1>;
-speed-divisors = <12 8 4>;
+speed-multipliers = <1 1 3>;
+speed-divisors = <2 1 2>;
 initial-speed-index = <1>;
 ```
 
-That gives `1/12`, `1/8`, and `1/4`, starting at the middle level.
+That gives `1/2`, `1/1`, and `3/2`, starting at the middle level.
 
 Example with 5 custom pointer levels:
 
@@ -406,6 +426,8 @@ The current Sweep-Pro setup uses these conventions:
   [docs/pinnacle-interface.md](docs/pinnacle-interface.md)
 - Cirque Pinnacle data output notes:
   [docs/pinnacle-data-output.md](docs/pinnacle-data-output.md)
+- Pointer and scroll speed calculation:
+  [docs/speed-calculation.md](docs/speed-calculation.md)
 
 ## Credits
 

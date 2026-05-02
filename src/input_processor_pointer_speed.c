@@ -146,6 +146,7 @@ static int pointer_speed_init(const struct device *dev)
 {
 	const struct pointer_speed_config *cfg = dev->config;
 
+	zmk_pointing_speed_set_count(ZMK_POINTING_SPEED_TARGET_POINTER, cfg->speed_count);
 	zmk_pointing_speed_set_initial_index(ZMK_POINTING_SPEED_TARGET_POINTER,
 					     cfg->initial_speed_index);
 	return 0;

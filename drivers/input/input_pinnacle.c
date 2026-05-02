@@ -127,6 +127,42 @@ static int pinnacle_soft_reset(const struct device *dev)
 	return 0;
 }
 
+static int pinnacle_startup(const struct device *dev, uint8_t *firmware_id)
+{
+	int rc = -EIO;
+
+	for (int i = 0; i < PINNACLE_INIT_RETRY_COUNT; i++) {
+		if (i > 0) {
+			k_sleep(K_MSEC(PINNACLE_INIT_RETRY_DELAY_MS));
+		}
+
+		rc = pinnacle_soft_reset(dev);
+		if (rc) {
+			LOG_WRN("Pinnacle soft reset failed on attempt %d/%d (%d)", i + 1,
+				PINNACLE_INIT_RETRY_COUNT, rc);
+			continue;
+		}
+
+		rc = pinnacle_read_firmware_id(dev, firmware_id);
+		if (rc) {
+			LOG_WRN("Failed to read FirmwareId on attempt %d/%d (%d)", i + 1,
+				PINNACLE_INIT_RETRY_COUNT, rc);
+			continue;
+		}
+
+		if (*firmware_id != PINNACLE_FIRMWARE_ID) {
+			LOG_WRN("Incorrect Firmware ASIC ID %x on attempt %d/%d", *firmware_id,
+				i + 1, PINNACLE_INIT_RETRY_COUNT);
+			rc = -ENODEV;
+			continue;
+		}
+
+		return 0;
+	}
+
+	return rc;
+}
+
 static int pinnacle_era_wait_for_completion(const struct device *dev)
 {
 	bool ret;
@@ -1324,20 +1360,10 @@ static int pinnacle_init(const struct device *dev)
 		k_sleep(K_MSEC(config->startup_delay_ms));
 	}
 
-	rc = pinnacle_soft_reset(dev);
+	rc = pinnacle_startup(dev, &value);
 	if (rc) {
+		LOG_ERR("Pinnacle startup failed (%d)", rc);
 		return rc;
-	}
-
-	rc = pinnacle_read_firmware_id(dev, &value);
-	if (rc) {
-		LOG_ERR("Failed to read FirmwareId");
-		return rc;
-	}
-
-	if (value != PINNACLE_FIRMWARE_ID) {
-		LOG_ERR("Incorrect Firmware ASIC ID %x", value);
-		return -ENODEV;
 	}
 
 	/* Set trackpad sensitivity */

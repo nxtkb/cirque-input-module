@@ -12,10 +12,10 @@ properties:
     type: boolean
   speed-multipliers:
     type: array
-    default: [1, 1, 1]
+    default: [1, 1, 3]
   speed-divisors:
     type: array
-    default: [12, 8, 4]
+    default: [2, 1, 2]
   initial-speed-index:
     type: int
     default: 1
@@ -25,6 +25,15 @@ properties:
   scroll-max-delta:
     type: int
     default: 0
+  scroll-curve-deadzone:
+    type: int
+    default: 2
+  scroll-curve-accel-multiplier:
+    type: int
+    default: 1
+  scroll-curve-accel-divisor:
+    type: int
+    default: 16
   scroll-inertia:
     type: boolean
   scroll-inertia-interval-ms:
