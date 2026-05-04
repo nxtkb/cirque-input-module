@@ -1119,6 +1119,8 @@ int zmk_cirque_mode_apply(const struct device *dev, enum zmk_cirque_mode_action 
 		return rc;
 	}
 
+	zmk_cirque_mode_report(dev, relative_mode);
+
 	LOG_INF("Cirque data mode switched to %s", relative_mode ? "relative" : "absolute");
 
 	return 0;
@@ -1395,6 +1397,8 @@ static int pinnacle_init(const struct device *dev)
 	if (rc) {
 		return rc;
 	}
+
+	zmk_cirque_mode_report(dev, drv_data->relative_mode);
 
 	rc = pinnacle_init_interrupt(dev);
 	if (rc) {
