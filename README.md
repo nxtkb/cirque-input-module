@@ -78,10 +78,11 @@ Use `cirque,pinnacle2` for the trackpad node:
         status = "okay";
         data-ready-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
         sensitivity = "2x";
-        data-mode = "relative"; /* or "absolute" for driver-side delta tracking */
+        data-mode = "absolute"; /* or "relative" for the ASIC's stock behavior */
         absolute-relative-divisor = <8>;
         absolute-touch-min-z = <1>;
         primary-tap-enable;
+        glide-extend-enable; /* Used only when switching to relative mode. */
         sleep-mode-enable;
         invert-y;
     };
@@ -99,6 +100,9 @@ data-mode = "relative";
 /* or */
 data-mode = "absolute";
 ```
+
+If omitted, `data-mode` defaults to `absolute`. Set it to `relative` explicitly
+when you want the ASIC's stock relative packet and GlideExtend behavior at boot.
 
 ### User-Facing Feature Map
 
@@ -149,8 +153,11 @@ Absolute mode is useful when:
 
 Current absolute-mode behavior:
 
-- The first touch establishes a baseline. Later packets become `REL_X/Y`
-  pointer deltas until the finger lifts.
+- The first touch establishes a baseline. When software taps are enabled, small
+  startup movement is suppressed until the touch exceeds
+  `absolute-tap-max-movement`; after that, packets become `REL_X/Y` pointer
+  deltas until the finger lifts. Without software taps, absolute movement starts
+  immediately after the first baseline packet.
 - A forced idle packet after lift resets the baseline and avoids jumps between
   strokes.
 - `primary-tap-enable` enables software tap detection. By default it emits
@@ -159,9 +166,10 @@ Current absolute-mode behavior:
 - `absolute-tap-max-ms` and `absolute-tap-max-movement` tune software tap
   recognition. `absolute-tap-click-ms` controls how long the generated mouse
   button is held before release. `absolute-tap-drag-enable` enables
-  double-tap-drag text selection / dragging, with
-  `absolute-tap-drag-timeout-ms` and `absolute-tap-drag-max-movement` for
-  calibration.
+  double-tap-drag text selection / dragging; the second touch only presses the
+  primary button after it moves beyond `absolute-tap-max-movement`.
+  `absolute-tap-drag-timeout-ms` and `absolute-tap-drag-max-movement` control
+  whether that second touch is considered part of the prior tap.
 - `absolute-touch-min-z` sets the minimum absolute-mode pressure treated as a
   real touch. Increase it if very light contact or hover-like samples cause
   unwanted pointer movement.

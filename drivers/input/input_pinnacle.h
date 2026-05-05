@@ -246,6 +246,8 @@ struct pinnacle_data {
 	enum pinnacle_absolute_scroll_mode scroll_mode;
 	bool touching;
 	bool tap_dragging;
+	bool absolute_tap_drag_candidate;
+	bool absolute_motion_started;
 	bool relative_mode;
 	const struct device *dev;
 	struct gpio_callback dr_cb_data;

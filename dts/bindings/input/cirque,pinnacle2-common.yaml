@@ -21,7 +21,7 @@ properties:
 
   data-mode:
     type: string
-    default: "relative"
+    default: "absolute"
     description: |
       Data output mode in which position is reported. In the relative mode
       each position is reported as relative to the last position. In the

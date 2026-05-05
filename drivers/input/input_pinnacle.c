@@ -914,6 +914,7 @@ static void pinnacle_schedule_absolute_edge_motion(const struct device *dev)
 
 	if (pinnacle_is_relative_mode(dev) || !drv_data->touching ||
 	    !config->absolute_edge_motion_enabled ||
+	    !drv_data->absolute_motion_started ||
 	    drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {
 		k_work_cancel_delayable(&drv_data->edge_motion_work);
 		return;
@@ -944,6 +945,7 @@ static void pinnacle_edge_motion_work_cb(struct k_work *work)
 	int32_t delta_y;
 
 	if (pinnacle_is_relative_mode(dev) || !drv_data->touching ||
+	    !drv_data->absolute_motion_started ||
 	    drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {
 		return;
 	}
@@ -1004,7 +1006,9 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	if (drv_data->tap_dragging) {
 		input_report_key(dev, INPUT_BTN_0, false, true, K_FOREVER);
 		drv_data->tap_dragging = false;
+		drv_data->absolute_tap_drag_candidate = false;
 		drv_data->touching = false;
+		drv_data->absolute_motion_started = false;
 		drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 		drv_data->scroll_remainder = 0;
 		drv_data->last_tap_time_ms = 0;
@@ -1040,6 +1044,8 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	}
 
 	drv_data->touching = false;
+	drv_data->absolute_tap_drag_candidate = false;
+	drv_data->absolute_motion_started = false;
 	drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 	drv_data->scroll_remainder = 0;
 }
@@ -1065,6 +1071,8 @@ static void pinnacle_clear_runtime_state(const struct device *dev)
 	drv_data->btn_aux = false;
 	drv_data->touching = false;
 	drv_data->tap_dragging = false;
+	drv_data->absolute_tap_drag_candidate = false;
+	drv_data->absolute_motion_started = false;
 	drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 	drv_data->scroll_remainder = 0;
 	drv_data->last_tap_time_ms = 0;
@@ -1233,17 +1241,19 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			}
 
 			drv_data->touching = true;
-			drv_data->tap_dragging =
-				pinnacle_should_start_absolute_tap_drag(dev, sample->abs_x, sample->abs_y);
-			if (drv_data->tap_dragging) {
-				input_report_key(dev, INPUT_BTN_0, true, true, K_FOREVER);
-				drv_data->last_tap_time_ms = 0;
+			drv_data->tap_dragging = false;
+			drv_data->absolute_tap_drag_candidate =
+				pinnacle_should_start_absolute_tap_drag(dev, sample->abs_x,
+									sample->abs_y);
+			if (drv_data->absolute_tap_drag_candidate) {
 				drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 			} else {
 				drv_data->scroll_mode =
 					pinnacle_absolute_scroll_mode_for_touch(dev, sample->abs_x,
-									     sample->abs_y);
+										sample->abs_y);
 			}
+			drv_data->absolute_motion_started =
+				drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE;
 			drv_data->scroll_remainder = 0;
 
 			drv_data->previous_abs_x = sample->abs_x;
@@ -1253,19 +1263,59 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			drv_data->touch_current_x = sample->abs_x;
 			drv_data->touch_current_y = sample->abs_y;
 			drv_data->touch_start_time_ms = k_uptime_get();
-			pinnacle_schedule_absolute_edge_motion(dev);
+			if (drv_data->absolute_motion_started) {
+				pinnacle_schedule_absolute_edge_motion(dev);
+			}
 			return 0;
 		}
 
 		if (drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {
 			pinnacle_report_absolute_scroll(dev, drv_data->previous_abs_x,
-								drv_data->previous_abs_y, sample->abs_x,
-								sample->abs_y);
+							drv_data->previous_abs_y, sample->abs_x,
+							sample->abs_y);
 			drv_data->previous_abs_x = sample->abs_x;
 			drv_data->previous_abs_y = sample->abs_y;
 			drv_data->touch_current_x = sample->abs_x;
 			drv_data->touch_current_y = sample->abs_y;
 			return 0;
+		}
+
+		int32_t movement_x = pinnacle_abs32((int32_t)sample->abs_x -
+						    (int32_t)drv_data->touch_start_abs_x);
+		int32_t movement_y = pinnacle_abs32((int32_t)sample->abs_y -
+						    (int32_t)drv_data->touch_start_abs_y);
+
+		if (drv_data->absolute_tap_drag_candidate) {
+			if (movement_x <= config->absolute_tap_max_movement &&
+			    movement_y <= config->absolute_tap_max_movement) {
+				drv_data->previous_abs_x = sample->abs_x;
+				drv_data->previous_abs_y = sample->abs_y;
+				drv_data->touch_current_x = sample->abs_x;
+				drv_data->touch_current_y = sample->abs_y;
+				return 0;
+			}
+
+			input_report_key(dev, INPUT_BTN_0, true, true, K_FOREVER);
+			drv_data->tap_dragging = true;
+			drv_data->absolute_tap_drag_candidate = false;
+			drv_data->absolute_motion_started = true;
+			drv_data->last_tap_time_ms = 0;
+			pinnacle_schedule_absolute_edge_motion(dev);
+		}
+
+		if (!drv_data->absolute_motion_started) {
+			if (config->primary_tap_enabled &&
+			    movement_x <= config->absolute_tap_max_movement &&
+			    movement_y <= config->absolute_tap_max_movement) {
+				drv_data->previous_abs_x = sample->abs_x;
+				drv_data->previous_abs_y = sample->abs_y;
+				drv_data->touch_current_x = sample->abs_x;
+				drv_data->touch_current_y = sample->abs_y;
+				return 0;
+			}
+
+			drv_data->absolute_motion_started = true;
+			pinnacle_schedule_absolute_edge_motion(dev);
 		}
 
 		int32_t delta_x = (int32_t)sample->abs_x - (int32_t)drv_data->previous_abs_x;
