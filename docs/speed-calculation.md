@@ -21,49 +21,63 @@ With that order:
 
 This means hold-to-scroll does not use pointer-scaled motion as its input. When
 drag-scroll is active, `pointer_processor` intentionally leaves `INPUT_REL_X/Y`
-unchanged, then `drag_scroll_processor` applies the scroll speed table to those
+unchanged, then `drag_scroll_processor` applies scroll scaling to those
 raw deltas.
 
-## Runtime Speed Tables
+## Runtime Speed Positions
 
-Pointer speed and scroll speed use separate runtime indexes, but the table
-format is the same:
+Pointer speed and scroll speed use separate runtime positions. Each position is
+an integer from `0` to `100`:
+
+- `0`: `min-percent`, normally `0.1x`
+- `50`: `1x`
+- `100`: `max-percent`, normally `4x` for pointer and `10x` for scroll
+
+The processor configuration defines the 1x base speed:
 
 ```dts
-speed-multipliers = <1 1 3>;
-speed-divisors = <2 1 2>;
-initial-speed-index = <1>;
+one-x-multiplier = <1>;
+one-x-divisor = <1>;
+min-percent = <10>;
+max-percent = <400>;
+initial-speed-position = <50>;
 ```
 
 For each input event:
 
 ```text
-level = runtime_index
-scaled = (input_delta * speed_multipliers[level] + remainder) / speed_divisors[level]
-remainder = input_delta * speed_multipliers[level] + old_remainder
-          - scaled * speed_divisors[level]
+runtime_multiplier = multiplier_for_position(runtime_position)
+numerator = input_delta * one-x-multiplier * runtime_multiplier
+denominator = one-x-divisor
+scaled = (numerator + remainder) / denominator
+remainder = numerator + old_remainder - scaled * denominator
 ```
 
-Integer division truncates toward zero. If a divisor is configured as `0`, the
-processor treats it as `1`.
+The runtime multiplier is stored as fixed-point Q16.16 internally, so the real
+denominator is `one-x-divisor * 65536`. Integer division truncates toward zero.
+If a divisor is configured as `0`, the processor treats it as `1`.
 
 When `track-remainders` is enabled, fractional movement is carried into later
 events through `remainder`. Without it, any fractional part from integer
 division is discarded.
 
-The default table above gives these levels:
+The lower half of the position range is linear:
 
-| Index | Multiplier | Divisor | Effective scale |
-| ---: | ---: | ---: | ---: |
-| 0 | 1 | 2 | `0.5x` |
-| 1 | 1 | 1 | `1.0x` |
-| 2 | 3 | 2 | `1.5x` |
+```text
+0..50: 0.1x -> 1.0x
+```
 
-`initial-speed-index = <1>` is the fallback boot level. When settings are
-enabled, runtime pointer and scroll speed indexes are saved after `&ptr_spd`
-changes and restored after reboot. If a saved or configured index is larger
-than the current table, it is clamped to the last valid level; runtime
-adjustments wrap within the current table.
+The upper half uses built-in exponential curves for the common `4x` pointer and
+`10x` scroll ranges. Other `max-percent` values use a linear fallback:
+
+```text
+50..100: 1.0x -> max-percent
+```
+
+`initial-speed-position = <50>` is the fallback boot position. When settings are
+enabled, runtime pointer and scroll speeds are saved per selected ZMK endpoint:
+USB has one state and each BLE profile has its own state. Saved and configured
+positions are clamped to `0..100`; runtime adjustments clamp at the ends.
 
 ## Pointer Processor
 
@@ -71,7 +85,7 @@ adjustments wrap within the current table.
 not active:
 
 ```text
-pointer_delta = speed_table(input_delta)
+pointer_delta = speed_position_scale(input_delta)
 pointer_delta = pointer_curve(pointer_delta)
 pointer_delta = clamp_to_int16(pointer_delta)
 ```
@@ -98,43 +112,43 @@ if pointer-curve-max-delta > 0:
 pointer_delta = sign(pointer_delta) * curved
 ```
 
-So the speed table is the base scale, and the adaptive curve optionally adds
+So runtime scaling is the base scale, and the adaptive curve optionally adds
 extra acceleration for larger deltas.
 
 ## Drag-Scroll Processor
 
-`drag_scroll_processor` uses the scroll speed index and scroll speed table. It
+`drag_scroll_processor` uses the scroll speed position and scroll scaling. It
 handles three kinds of input:
 
 | Input event | When handled | Output event | Extra scaling |
 | --- | --- | --- | --- |
-| `INPUT_REL_X` | Drag-scroll active | `INPUT_REL_HWHEEL` | Scroll table, then scroll curve |
-| `INPUT_REL_Y` | Drag-scroll active | `INPUT_REL_WHEEL` | Scroll table, scroll curve, then sign flip |
-| `INPUT_REL_WHEEL/HWHEEL` | Always | Wheel / horizontal wheel | `NATIVE_WHEEL_SPEED_BOOST`, scroll table, then scroll curve |
+| `INPUT_REL_X` | Drag-scroll active | `INPUT_REL_HWHEEL` | Scroll scaling, then scroll curve |
+| `INPUT_REL_Y` | Drag-scroll active | `INPUT_REL_WHEEL` | Scroll scaling, scroll curve, then sign flip |
+| `INPUT_REL_WHEEL/HWHEEL` | Always | Wheel / horizontal wheel | `NATIVE_WHEEL_SPEED_BOOST`, scroll scaling, then scroll curve |
 
 For hold-to-scroll, the formula is:
 
 ```text
-wheel_delta = scroll_curve(speed_table(raw_pointer_delta))
+wheel_delta = scroll_curve(speed_position_scale(raw_pointer_delta))
 ```
 
 For Y movement, the processor flips the sign after scaling so moving the finger
 in the expected direction produces the expected vertical wheel direction.
 
 For native wheel events, such as relative-mode right-edge scrolling from the
-Pinnacle ASIC, the processor first multiplies the selected table multiplier by
-`NATIVE_WHEEL_SPEED_BOOST`, currently `8`:
+Pinnacle ASIC, the processor first multiplies the configured 1x base multiplier
+by `NATIVE_WHEEL_SPEED_BOOST`, currently `8`:
 
 ```text
 native_wheel_delta = scroll_curve(
-    speed_table(raw_wheel_delta, multiplier * 8, divisor)
+    speed_position_scale(raw_wheel_delta, one-x-multiplier * 8, one-x-divisor)
 )
 ```
 
 This compensation exists because native wheel packets are much smaller than
 pointer motion deltas.
 
-The scroll curve is always part of the drag-scroll processor. The speed table
+The scroll curve is always part of the drag-scroll processor. Runtime scaling
 controls the base scale; the curve only adds extra response for larger deltas:
 
 ```text
@@ -194,7 +208,7 @@ The resulting `INPUT_REL_X/Y` events then pass through `pointer_processor`, so
 absolute-mode pointer speed is affected by both:
 
 - `absolute-relative-multiplier` / `absolute-relative-divisor`
-- the pointer processor speed table and optional pointer curve
+- the pointer processor runtime speed position and optional pointer curve
 
 Absolute edge scrolling:
 
@@ -208,15 +222,20 @@ Those emitted `INPUT_REL_WHEEL/HWHEEL` events then pass through
 `drag_scroll_processor`, so absolute edge scrolling is affected by both:
 
 - `absolute-scroll-divisor`
-- the scroll processor speed table, native wheel boost, min/max step handling,
+- the scroll processor runtime speed position, native wheel boost, min/max step handling,
   scroll curve, and optional `invert-scroll`
 
 ## Practical Tuning Notes
 
-- To make all pointer movement faster or slower at runtime, change the pointer
-  speed table or use `&ptr_spd SPEED_POINTER ...` bindings.
-- To make hold-to-scroll faster or slower, change the scroll speed table or use
-  `&ptr_spd SPEED_SCROLL ...` bindings.
+- To change the baseline pointer feel, tune `one-x-multiplier` and
+  `one-x-divisor` on `pointer_processor`.
+- To change the baseline hold-to-scroll feel, tune `one-x-multiplier` and
+  `one-x-divisor` on `drag_scroll_processor`.
+- To adjust speed at runtime, use `&ptr_spd SPEED_POINTER ...` or
+  `&ptr_spd SPEED_SCROLL ...` bindings, commonly from encoders.
+- Use the fine actions to adjust the active multiplier by `0.01x` without
+  moving the coarse runtime position.
+- Use the reset action to return a target to position `50`, i.e. `1x`.
 - To make relative-mode right-edge scrolling faster or slower relative to
   hold-to-scroll, adjust `NATIVE_WHEEL_SPEED_BOOST` in the processor code.
 - To make absolute-mode pointer movement feel different before processor

@@ -16,6 +16,7 @@
 #include <drivers/input_processor.h>
 #include <zmk/drag_scroll.h>
 #include <zmk/pointing_speed.h>
+#include <zmk/pointing_speed_math.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -25,15 +26,16 @@ enum pointer_curve {
 };
 
 struct pointer_speed_config {
-	size_t speed_count;
-	uint8_t initial_speed_index;
+	uint8_t initial_speed_position;
 	enum pointer_curve pointer_curve;
 	uint16_t pointer_curve_deadzone;
 	uint16_t pointer_curve_accel_multiplier;
 	uint16_t pointer_curve_accel_divisor;
 	uint16_t pointer_curve_max_delta;
-	const uint32_t *speed_multipliers;
-	const uint32_t *speed_divisors;
+	uint32_t one_x_multiplier;
+	uint32_t one_x_divisor;
+	uint16_t min_percent;
+	uint16_t max_percent;
 };
 
 static int32_t clamp_to_i16(int64_t value)
@@ -49,23 +51,27 @@ static int32_t clamp_to_i16(int64_t value)
 	return (int32_t)value;
 }
 
-static int32_t scale_value(struct input_event *event, uint32_t mul, uint32_t div,
+static int32_t scale_value(struct input_event *event, const struct pointer_speed_config *cfg,
 			   struct zmk_input_processor_state *state)
 {
-	if (div == 0) {
-		div = 1;
+	uint32_t div = cfg->one_x_divisor;
+	if (div == 0U) {
+		div = 1U;
 	}
 
-	int64_t value_mul = (int64_t)event->value * (int64_t)mul;
+	uint32_t speed_q16 = zmk_pointing_speed_get_multiplier_q16(ZMK_POINTING_SPEED_TARGET_POINTER);
+	int64_t divisor = (int64_t)div * ZMK_POINTING_SPEED_Q16_SCALE;
+	int64_t value_mul =
+		(int64_t)event->value * (int64_t)cfg->one_x_multiplier * (int64_t)speed_q16;
 
 	if (state != NULL && state->remainder != NULL) {
 		value_mul += *state->remainder;
 	}
 
-	int64_t scaled = value_mul / (int64_t)div;
+	int64_t scaled = value_mul / divisor;
 
 	if (state != NULL && state->remainder != NULL) {
-		*state->remainder = value_mul - (scaled * (int64_t)div);
+		*state->remainder = value_mul - (scaled * divisor);
 	}
 
 	return clamp_to_i16(scaled);
@@ -123,11 +129,7 @@ static int pointer_speed_handle_event(const struct device *dev, struct input_eve
 		if (zmk_drag_scroll_is_enabled()) {
 			break;
 		}
-		uint8_t speed_index =
-			zmk_pointing_speed_get_index(ZMK_POINTING_SPEED_TARGET_POINTER) %
-			cfg->speed_count;
-		event->value = scale_value(event, cfg->speed_multipliers[speed_index],
-					   cfg->speed_divisors[speed_index], state);
+		event->value = scale_value(event, cfg, state);
 		event->value = apply_pointer_curve(event->value, cfg);
 		break;
 	}
@@ -146,30 +148,25 @@ static int pointer_speed_init(const struct device *dev)
 {
 	const struct pointer_speed_config *cfg = dev->config;
 
-	zmk_pointing_speed_set_count(ZMK_POINTING_SPEED_TARGET_POINTER, cfg->speed_count);
-	zmk_pointing_speed_set_initial_index(ZMK_POINTING_SPEED_TARGET_POINTER,
-					     cfg->initial_speed_index);
+	zmk_pointing_speed_set_initial_position(ZMK_POINTING_SPEED_TARGET_POINTER,
+						cfg->initial_speed_position);
+	zmk_pointing_speed_set_range(ZMK_POINTING_SPEED_TARGET_POINTER, cfg->min_percent,
+				     cfg->max_percent);
 	return 0;
 }
 
 #define POINTER_SPEED_PROCESSOR_INST(n)                                                            \
-	BUILD_ASSERT(DT_INST_PROP_LEN(n, speed_multipliers) ==                                  \
-			     DT_INST_PROP_LEN(n, speed_divisors),                                  \
-		     "speed-multipliers and speed-divisors must have the same length");             \
-	BUILD_ASSERT(DT_INST_PROP_LEN(n, speed_multipliers) > 0,                                 \
-		     "at least one speed level is required");                                      \
-	static const uint32_t pointer_speed_multipliers_##n[] = DT_INST_PROP(n, speed_multipliers); \
-	static const uint32_t pointer_speed_divisors_##n[] = DT_INST_PROP(n, speed_divisors);       \
 	static const struct pointer_speed_config pointer_speed_config_##n = {                       \
-		.speed_count = DT_INST_PROP_LEN(n, speed_multipliers),                             \
-		.initial_speed_index = DT_INST_PROP(n, initial_speed_index),                       \
+		.initial_speed_position = DT_INST_PROP(n, initial_speed_position),                 \
 		.pointer_curve = DT_INST_ENUM_IDX(n, pointer_curve),                               \
 		.pointer_curve_deadzone = DT_INST_PROP(n, pointer_curve_deadzone),                 \
 		.pointer_curve_accel_multiplier = DT_INST_PROP(n, pointer_curve_accel_multiplier), \
 		.pointer_curve_accel_divisor = DT_INST_PROP(n, pointer_curve_accel_divisor),       \
 		.pointer_curve_max_delta = DT_INST_PROP(n, pointer_curve_max_delta),               \
-		.speed_multipliers = pointer_speed_multipliers_##n,                                \
-		.speed_divisors = pointer_speed_divisors_##n,                                      \
+		.one_x_multiplier = DT_INST_PROP(n, one_x_multiplier),                             \
+		.one_x_divisor = DT_INST_PROP(n, one_x_divisor),                                   \
+		.min_percent = DT_INST_PROP(n, min_percent),                                       \
+		.max_percent = DT_INST_PROP(n, max_percent),                                       \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(n, pointer_speed_init, NULL, NULL, &pointer_speed_config_##n,        \
 			      POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                     \

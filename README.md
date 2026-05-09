@@ -21,7 +21,7 @@ absolute-coordinate processing, or ZMK input processors.
 - Extended dragging / repositioning behavior, either ASIC-provided or driver-side.
 - Runtime pointer and scroll speed adjustment.
 - Runtime switching between Cirque relative and absolute data modes.
-- User-defined speed tables with any number of speed levels.
+- User-defined 1x base speed with fine runtime scaling.
 
 ## ZMK Build Setup
 
@@ -221,12 +221,22 @@ Then define the processors and behaviors:
         compatible = "zmk,input-processor-pointer-speed";
         #input-processor-cells = <2>;
         track-remainders;
+        one-x-multiplier = <1>;
+        one-x-divisor = <1>;
+        min-percent = <10>;
+        max-percent = <400>;
+        initial-speed-position = <50>;
     };
 
     drag_scroll_processor: drag_scroll_processor {
         compatible = "zmk,input-processor-drag-scroll";
         #input-processor-cells = <2>;
         track-remainders;
+        one-x-multiplier = <1>;
+        one-x-divisor = <1>;
+        min-percent = <10>;
+        max-percent = <1000>;
+        initial-speed-position = <50>;
     };
 
     behaviors {
@@ -249,12 +259,12 @@ Then define the processors and behaviors:
 ```
 
 The parameters in `&pointer_processor 0 0` are kept for compatibility with the
-processor binding. Runtime pointer speed is controlled by the speed table
-described below.
+processor binding. Runtime pointer speed is controlled by the fine speed
+position described below.
 
 The parameters in `&drag_scroll_processor 1 8` are kept for compatibility with
-the processor binding. Runtime scroll speed is controlled by the speed table
-described below.
+the processor binding. Runtime scroll speed is controlled by the fine speed
+position described below.
 
 This module no longer provides a separate hold-to-snipe behavior. Fine pointer
 movement is handled by the pointer-speed processor and the `&ptr_spd` runtime
@@ -291,13 +301,16 @@ controlled by the same scroll speed setting.
 
 ## Runtime Speed Control
 
-`&ptr_spd` changes the current speed level at runtime:
+`&ptr_spd` changes the current fine speed position at runtime:
 
 ```dts
 #define SPEED_POINTER 0
 #define SPEED_SCROLL 1
 #define SPEED_PREV 0
 #define SPEED_NEXT 1
+#define SPEED_RESET 2
+#define SPEED_FINE_PREV 3
+#define SPEED_FINE_NEXT 4
 ```
 
 Bindings:
@@ -305,15 +318,28 @@ Bindings:
 ```dts
 &ptr_spd SPEED_POINTER SPEED_PREV
 &ptr_spd SPEED_POINTER SPEED_NEXT
+&ptr_spd SPEED_POINTER SPEED_RESET
+&ptr_spd SPEED_POINTER SPEED_FINE_PREV
+&ptr_spd SPEED_POINTER SPEED_FINE_NEXT
 &ptr_spd SPEED_SCROLL SPEED_PREV
 &ptr_spd SPEED_SCROLL SPEED_NEXT
+&ptr_spd SPEED_SCROLL SPEED_RESET
+&ptr_spd SPEED_SCROLL SPEED_FINE_PREV
+&ptr_spd SPEED_SCROLL SPEED_FINE_NEXT
 ```
 
-When settings are enabled, the current pointer and scroll speed indexes are
-saved after each `&ptr_spd` adjustment and restored after reboot. If no saved
-setting exists, each processor starts from its `initial-speed-index`. Saved or
-configured indexes that are larger than the current table are clamped to the
-last valid level, and runtime adjustments wrap within the current table.
+The runtime position range is `0..100`. Position `50` is always `1x`.
+Positions below `50` scale linearly from `0.1x` to `1x`; positions above `50`
+use the built-in exponential curves for the common `4x` pointer and `10x`
+scroll ranges. Other `max-percent` values use a linear fallback. Coarse
+`SPEED_PREV` / `SPEED_NEXT` actions move the runtime position by one. Fine
+`SPEED_FINE_PREV` / `SPEED_FINE_NEXT` actions adjust the current multiplier by
+`0.01x`. Runtime adjustments clamp at the ends instead of wrapping.
+`SPEED_RESET` returns the selected target to position `50`, i.e. `1x`.
+
+When settings are enabled, pointer and scroll speeds are saved per selected ZMK
+endpoint: USB has one state and each BLE profile has its own state. If no saved
+setting exists, each processor starts from its `initial-speed-position`.
 
 ## Runtime Data Mode Control
 
@@ -343,22 +369,24 @@ When settings are enabled, the selected relative / absolute mode is saved after
 runtime changes and restored after reboot. `data-mode` in devicetree remains the
 fallback used when no saved setting exists.
 
-## Custom Speed Tables
+## Base Speed And Runtime Scaling
 
-Both processors support speed tables:
+Both processors support a user-defined 1x base speed:
 
-- `speed-multipliers`
-- `speed-divisors`
-- `initial-speed-index`
+- `one-x-multiplier`
+- `one-x-divisor`
+- `min-percent`
+- `max-percent`
+- `initial-speed-position`
 
-The multiplier and divisor arrays must have the same length. That length is the
-number of speed levels. Any number of levels is allowed.
+The base speed is the scale applied at runtime position `50`. Runtime position
+then applies a multiplier on top of that base speed.
 
 For the exact pointer, hold-to-scroll, native wheel, and absolute-mode edge
 scroll formulas, see
 [Pointer And Scroll Speed Calculation](docs/speed-calculation.md).
 
-Scroll also applies a small acceleration curve after the speed table. The
+Scroll also applies a small acceleration curve after runtime scaling. The
 default curve leaves small deltas unchanged and boosts larger deltas:
 
 ```dts
@@ -367,36 +395,40 @@ scroll-curve-accel-multiplier = <1>;
 scroll-curve-accel-divisor = <16>;
 ```
 
-Pointer speed defaults to 3 levels:
+Pointer speed defaults to `1x` at position `50`, with a `0.1x..4x` runtime
+range:
 
 ```dts
-speed-multipliers = <1 1 3>;
-speed-divisors = <2 1 2>;
-initial-speed-index = <1>;
+one-x-multiplier = <1>;
+one-x-divisor = <1>;
+min-percent = <10>;
+max-percent = <400>;
+initial-speed-position = <50>;
 ```
 
-That gives `1/2`, `1/1`, and `3/2`, starting at the middle level.
-
-Scroll speed defaults to 3 levels:
+Scroll speed defaults to `1x` at position `50`, with a `0.1x..10x` runtime
+range:
 
 ```dts
-speed-multipliers = <1 1 3>;
-speed-divisors = <2 1 2>;
-initial-speed-index = <1>;
+one-x-multiplier = <1>;
+one-x-divisor = <1>;
+min-percent = <10>;
+max-percent = <1000>;
+initial-speed-position = <50>;
 ```
 
-That gives `1/2`, `1/1`, and `3/2`, starting at the middle level.
-
-Example with 5 custom pointer levels:
+Example with a slower custom pointer 1x speed:
 
 ```dts
 pointer_processor: pointer_processor {
     compatible = "zmk,input-processor-pointer-speed";
     #input-processor-cells = <2>;
     track-remainders;
-    speed-multipliers = <1 2 1 3 2>;
-    speed-divisors = <4 3 1 2 1>;
-    initial-speed-index = <2>;
+    one-x-multiplier = <3>;
+    one-x-divisor = <4>;
+    min-percent = <10>;
+    max-percent = <400>;
+    initial-speed-position = <50>;
 };
 ```
 
@@ -407,16 +439,17 @@ The current Sweep-Pro setup uses these conventions:
 - `Z`: tap `Z`, hold for drag-scroll.
 - `X`: tap `X`, hold for left click/selection.
 - `C`: normal typing key.
-- `MOUSE` layer: pointer speed down/up and scroll speed down/up are placed on
-  the left side of the third row.
+- `MOUSE` layer: left encoder adjusts pointer speed; right encoder adjusts
+  scroll speed. The left side of the third row can also provide fine pointer
+  down/up and fine scroll down/up bindings.
 
 ## Notes
 
 - Relative-mode native right-edge scrolling is generated by the Cirque firmware
   as `INPUT_REL_WHEEL`.
 - Relative-mode native wheel events are speed-controlled by `drag_scroll_processor`.
-- Relative-mode native wheel events receive a fixed compensation before the scroll
-  speed table is applied so the right-edge scroll speed is close to hold-to-scroll speed.
+- Relative-mode native wheel events receive a fixed compensation before scroll
+  scaling is applied so the right-edge scroll speed is close to hold-to-scroll speed.
 - Button events are reported only on button-state changes, so a keyboard-held
   mouse button is not released by normal touchpad movement.
 

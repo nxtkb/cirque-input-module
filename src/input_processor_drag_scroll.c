@@ -21,6 +21,7 @@
 #include <zmk/hid.h>
 #endif
 #include <zmk/pointing_speed.h>
+#include <zmk/pointing_speed_math.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -36,8 +37,7 @@ enum native_wheel_axis {
 };
 
 struct drag_scroll_config {
-	size_t speed_count;
-	uint8_t initial_speed_index;
+	uint8_t initial_speed_position;
 	enum native_wheel_axis native_wheel_axis;
 	bool invert_scroll;
 	uint16_t scroll_min_step;
@@ -48,8 +48,10 @@ struct drag_scroll_config {
 	bool scroll_inertia;
 	uint16_t scroll_inertia_interval_ms;
 	uint8_t scroll_inertia_decay_percent;
-	const uint32_t *speed_multipliers;
-	const uint32_t *speed_divisors;
+	uint32_t one_x_multiplier;
+	uint32_t one_x_divisor;
+	uint16_t min_percent;
+	uint16_t max_percent;
 };
 
 struct drag_scroll_data {
@@ -103,17 +105,19 @@ static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint3
 				  const struct drag_scroll_config *cfg,
 				  struct zmk_input_processor_state *state)
 {
-	if (div == 0) {
-		div = 1;
+	if (div == 0U) {
+		div = 1U;
 	}
 
-	int64_t value_mul = (int64_t)event->value * (int64_t)mul;
+	uint32_t speed_q16 = zmk_pointing_speed_get_multiplier_q16(ZMK_POINTING_SPEED_TARGET_SCROLL);
+	int64_t divisor = (int64_t)div * ZMK_POINTING_SPEED_Q16_SCALE;
+	int64_t value_mul = (int64_t)event->value * (int64_t)mul * (int64_t)speed_q16;
 
 	if (state != NULL && state->remainder != NULL) {
 		value_mul += *state->remainder;
 	}
 
-	int64_t linear_scaled = value_mul / (int64_t)div;
+	int64_t linear_scaled = value_mul / divisor;
 	int64_t scaled = apply_scroll_curve(linear_scaled, cfg);
 
 	if (cfg->scroll_min_step > 0 && abs64(scaled) < cfg->scroll_min_step) {
@@ -132,7 +136,7 @@ static int32_t scale_scroll_value(struct input_event *event, uint32_t mul, uint3
 	}
 
 	if (state != NULL && state->remainder != NULL) {
-		*state->remainder = clamp_to_i16(value_mul - (linear_scaled * (int64_t)div));
+		*state->remainder = clamp_to_i16(value_mul - (linear_scaled * divisor));
 	}
 
 	return clamp_to_i16(scaled);
@@ -239,9 +243,6 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 		return ZMK_INPUT_PROC_CONTINUE;
 	}
 
-	uint8_t speed_index =
-		zmk_pointing_speed_get_index(ZMK_POINTING_SPEED_TARGET_SCROLL) % cfg->speed_count;
-
 	switch (event->code) {
 	case INPUT_REL_WHEEL:
 		if (cfg->native_wheel_axis == NATIVE_WHEEL_AXIS_HORIZONTAL ||
@@ -251,9 +252,8 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 		}
 		__fallthrough;
 	case INPUT_REL_HWHEEL: {
-		uint32_t native_mul =
-			cfg->speed_multipliers[speed_index] * NATIVE_WHEEL_SPEED_BOOST;
-		uint32_t native_div = cfg->speed_divisors[speed_index];
+		uint32_t native_mul = cfg->one_x_multiplier * NATIVE_WHEEL_SPEED_BOOST;
+		uint32_t native_div = cfg->one_x_divisor;
 		event->value = scale_scroll_value(event, native_mul, native_div, cfg, state);
 		event->value = maybe_invert_scroll(event->value, cfg);
 		if (event->code == INPUT_REL_HWHEEL) {
@@ -268,8 +268,8 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 			break;
 		}
 		event->code = INPUT_REL_HWHEEL;
-		uint32_t x_mul = cfg->speed_multipliers[speed_index];
-		uint32_t x_div = cfg->speed_divisors[speed_index];
+		uint32_t x_mul = cfg->one_x_multiplier;
+		uint32_t x_div = cfg->one_x_divisor;
 		event->value = scale_scroll_value(event, x_mul, x_div, cfg, state);
 		event->value = maybe_invert_scroll(event->value, cfg);
 		schedule_inertia(data, event->value, 0);
@@ -280,8 +280,8 @@ static int drag_scroll_handle_event(const struct device *dev, struct input_event
 			break;
 		}
 		event->code = INPUT_REL_WHEEL;
-		uint32_t y_mul = cfg->speed_multipliers[speed_index];
-		uint32_t y_div = cfg->speed_divisors[speed_index];
+		uint32_t y_mul = cfg->one_x_multiplier;
+		uint32_t y_div = cfg->one_x_divisor;
 		event->value = scale_scroll_value(event, y_mul, y_div, cfg, state);
 		event->value = -event->value;
 		event->value = maybe_invert_scroll(event->value, cfg);
@@ -309,25 +309,17 @@ static int drag_scroll_init(const struct device *dev)
 	k_work_init_delayable(&data->inertia_work, inertia_work_cb);
 #endif
 
-	zmk_pointing_speed_set_count(ZMK_POINTING_SPEED_TARGET_SCROLL, cfg->speed_count);
-	zmk_pointing_speed_set_initial_index(ZMK_POINTING_SPEED_TARGET_SCROLL,
-					     cfg->initial_speed_index);
+	zmk_pointing_speed_set_initial_position(ZMK_POINTING_SPEED_TARGET_SCROLL,
+						cfg->initial_speed_position);
+	zmk_pointing_speed_set_range(ZMK_POINTING_SPEED_TARGET_SCROLL, cfg->min_percent,
+				     cfg->max_percent);
 	return 0;
 }
 
 #define DRAG_SCROLL_PROCESSOR_INST(n)                                                              \
-	BUILD_ASSERT(DT_INST_PROP_LEN(n, speed_multipliers) ==                                  \
-			     DT_INST_PROP_LEN(n, speed_divisors),                                  \
-		     "speed-multipliers and speed-divisors must have the same length");             \
-	BUILD_ASSERT(DT_INST_PROP_LEN(n, speed_multipliers) > 0,                                 \
-		     "at least one speed level is required");                                      \
-	static const uint32_t drag_scroll_speed_multipliers_##n[] =                               \
-		DT_INST_PROP(n, speed_multipliers);                                              \
-	static const uint32_t drag_scroll_speed_divisors_##n[] = DT_INST_PROP(n, speed_divisors); \
 	static struct drag_scroll_data drag_scroll_data_##n;                                      \
 	static const struct drag_scroll_config drag_scroll_config_##n = {                         \
-		.speed_count = DT_INST_PROP_LEN(n, speed_multipliers),                             \
-		.initial_speed_index = DT_INST_PROP(n, initial_speed_index),                       \
+		.initial_speed_position = DT_INST_PROP(n, initial_speed_position),                 \
 		.native_wheel_axis = DT_INST_ENUM_IDX(n, native_wheel_axis),                       \
 		.invert_scroll = DT_INST_PROP(n, invert_scroll),                                   \
 		.scroll_min_step = DT_INST_PROP(n, scroll_min_step),                               \
@@ -339,8 +331,10 @@ static int drag_scroll_init(const struct device *dev)
 		.scroll_inertia = DT_INST_PROP(n, scroll_inertia),                                 \
 		.scroll_inertia_interval_ms = DT_INST_PROP(n, scroll_inertia_interval_ms),         \
 		.scroll_inertia_decay_percent = DT_INST_PROP(n, scroll_inertia_decay_percent),     \
-		.speed_multipliers = drag_scroll_speed_multipliers_##n,                            \
-		.speed_divisors = drag_scroll_speed_divisors_##n,                                  \
+		.one_x_multiplier = DT_INST_PROP(n, one_x_multiplier),                             \
+		.one_x_divisor = DT_INST_PROP(n, one_x_divisor),                                   \
+		.min_percent = DT_INST_PROP(n, min_percent),                                       \
+		.max_percent = DT_INST_PROP(n, max_percent),                                       \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(n, drag_scroll_init, NULL, &drag_scroll_data_##n,                    \
 			      &drag_scroll_config_##n, POST_KERNEL,                                    \
