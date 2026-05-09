@@ -27,6 +27,16 @@ static bool pinnacle_is_relative_mode(const struct device *dev)
 	return drv_data->relative_mode;
 }
 
+static void pinnacle_report_rel(const struct device *dev, uint16_t code, int32_t value, bool sync)
+{
+	(void)input_report_rel(dev, code, value, sync, K_NO_WAIT);
+}
+
+static void pinnacle_report_key(const struct device *dev, uint16_t code, bool value, bool sync)
+{
+	(void)input_report_key(dev, code, value, sync, K_NO_WAIT);
+}
+
 static inline bool pinnacle_bus_is_ready(const struct device *dev)
 {
 	const struct pinnacle_config *config = dev->config;
@@ -899,7 +909,7 @@ static void pinnacle_report_absolute_scroll(const struct device *dev, uint16_t p
 	ticks = pinnacle_absolute_scroll_accumulate(drv_data, delta,
 						      config->absolute_scroll_divisor);
 	if (ticks != 0) {
-		input_report_rel(dev, code, ticks, true, K_FOREVER);
+		pinnacle_report_rel(dev, code, ticks, true);
 	}
 }
 
@@ -955,8 +965,8 @@ static void pinnacle_edge_motion_work_cb(struct k_work *work)
 		return;
 	}
 
-	input_report_rel(dev, INPUT_REL_X, CLAMP(delta_x, INT16_MIN, INT16_MAX), false, K_FOREVER);
-	input_report_rel(dev, INPUT_REL_Y, CLAMP(delta_y, INT16_MIN, INT16_MAX), true, K_FOREVER);
+	pinnacle_report_rel(dev, INPUT_REL_X, CLAMP(delta_x, INT16_MIN, INT16_MAX), false);
+	pinnacle_report_rel(dev, INPUT_REL_Y, CLAMP(delta_y, INT16_MIN, INT16_MAX), true);
 	k_work_reschedule(&drv_data->edge_motion_work,
 			  K_MSEC(config->absolute_edge_motion_interval_ms));
 }
@@ -1004,7 +1014,7 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	k_work_cancel_delayable(&drv_data->edge_motion_work);
 
 	if (drv_data->tap_dragging) {
-		input_report_key(dev, INPUT_BTN_0, false, true, K_FOREVER);
+		pinnacle_report_key(dev, INPUT_BTN_0, false, true);
 		drv_data->tap_dragging = false;
 		drv_data->absolute_tap_drag_candidate = false;
 		drv_data->touching = false;
@@ -1029,9 +1039,9 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	    movement_y <= config->absolute_tap_max_movement) {
 		uint16_t code = pinnacle_absolute_tap_code(dev, drv_data->touch_current_x,
 								 drv_data->touch_current_y);
-		input_report_key(dev, code, true, true, K_FOREVER);
+		pinnacle_report_key(dev, code, true, true);
 		k_sleep(K_MSEC(config->absolute_tap_click_ms));
-		input_report_key(dev, code, false, true, K_FOREVER);
+		pinnacle_report_key(dev, code, false, true);
 
 		drv_data->last_tap_code = code;
 		if (code == INPUT_BTN_0) {
@@ -1057,13 +1067,13 @@ static void pinnacle_clear_runtime_state(const struct device *dev)
 	k_work_cancel_delayable(&drv_data->edge_motion_work);
 
 	if (drv_data->tap_dragging || drv_data->btn_primary) {
-		input_report_key(dev, INPUT_BTN_0, false, true, K_FOREVER);
+		pinnacle_report_key(dev, INPUT_BTN_0, false, true);
 	}
 	if (drv_data->btn_secondary) {
-		input_report_key(dev, INPUT_BTN_0 + 1, false, true, K_FOREVER);
+		pinnacle_report_key(dev, INPUT_BTN_0 + 1, false, true);
 	}
 	if (drv_data->btn_aux) {
-		input_report_key(dev, INPUT_BTN_0 + 2, false, true, K_FOREVER);
+		pinnacle_report_key(dev, INPUT_BTN_0 + 2, false, true);
 	}
 
 	drv_data->btn_primary = false;
@@ -1169,7 +1179,7 @@ static bool pinnacle_report_button_if_changed(const struct device *dev, uint16_t
 	}
 
 	*previous = current;
-	input_report_key(dev, code, current, sync, K_FOREVER);
+	pinnacle_report_key(dev, code, current, sync);
 	return true;
 }
 
@@ -1200,10 +1210,10 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			config->primary_tap_enabled && pinnacle_buttons_changed(drv_data, sample);
 
 		if (sample->wheelCount != 0) {
-			input_report_rel(dev, INPUT_REL_WHEEL, sample->wheelCount, true, K_FOREVER);
+			pinnacle_report_rel(dev, INPUT_REL_WHEEL, sample->wheelCount, true);
 		} else {
-			input_report_rel(dev, INPUT_REL_X, sample->rel_x, false, K_FOREVER);
-			input_report_rel(dev, INPUT_REL_Y, sample->rel_y, !buttons_changed, K_FOREVER);
+			pinnacle_report_rel(dev, INPUT_REL_X, sample->rel_x, false);
+			pinnacle_report_rel(dev, INPUT_REL_Y, sample->rel_y, !buttons_changed);
 		}
 		if (config->primary_tap_enabled) {
 			bool secondary_changed = sample->btn_secondary != drv_data->btn_secondary;
@@ -1295,7 +1305,7 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 				return 0;
 			}
 
-			input_report_key(dev, INPUT_BTN_0, true, true, K_FOREVER);
+			pinnacle_report_key(dev, INPUT_BTN_0, true, true);
 			drv_data->tap_dragging = true;
 			drv_data->absolute_tap_drag_candidate = false;
 			drv_data->absolute_motion_started = true;
@@ -1331,8 +1341,8 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 		drv_data->touch_current_y = sample->abs_y;
 		pinnacle_schedule_absolute_edge_motion(dev);
 
-		input_report_rel(dev, INPUT_REL_X, rel_x, false, K_FOREVER);
-		input_report_rel(dev, INPUT_REL_Y, rel_y, true, K_FOREVER);
+		pinnacle_report_rel(dev, INPUT_REL_X, rel_x, false);
+		pinnacle_report_rel(dev, INPUT_REL_Y, rel_y, true);
 	}
 
 	return 0;
