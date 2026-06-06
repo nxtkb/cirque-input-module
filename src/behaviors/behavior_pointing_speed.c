@@ -96,7 +96,7 @@ struct pointing_speed_settings {
 static int current_endpoint_index(void)
 {
 #if POINTING_SPEED_HAS_ENDPOINTS
-	int index = zmk_endpoint_instance_to_index(zmk_endpoint_get_selected());
+	int index = zmk_endpoint_instance_to_index(zmk_endpoints_selected());
 
 	if (index < 0 || index >= POINTING_SPEED_ENDPOINT_COUNT) {
 		return 0;

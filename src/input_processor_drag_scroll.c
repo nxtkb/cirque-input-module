@@ -215,7 +215,7 @@ static void inertia_work_cb(struct k_work *work)
 	}
 
 	zmk_hid_mouse_scroll_set(hwheel, wheel);
-	zmk_endpoint_send_mouse_report();
+	zmk_endpoints_send_mouse_report();
 	zmk_hid_mouse_scroll_set(0, 0);
 
 	k_work_schedule(&data->inertia_work, K_MSEC(cfg->scroll_inertia_interval_ms));
