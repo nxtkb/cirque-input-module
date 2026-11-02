@@ -248,6 +248,16 @@ properties:
       absolute-spiral-rim-enable is set. Set to 0 to treat the whole pad as
       jog-wheel.
 
+  absolute-spiral-zone-invert:
+    type: boolean
+    description: |
+      Invert the ownership of the spiral zone. By default jog-wheel scrolling
+      owns the INSIDE of absolute-spiral-zone-radius and rim-following owns
+      the OUTER ring. With this property set, jog-wheel owns the OUTER ring
+      (rotate near the edge to scroll) and rim-following owns the inner disc;
+      when rim-following is disabled the inner disc stays plain pointer
+      motion.
+
   absolute-spiral-deadzone-degrees:
     type: int
     default: 25

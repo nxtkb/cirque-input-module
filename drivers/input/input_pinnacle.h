@@ -222,6 +222,7 @@ struct pinnacle_config {
 	bool absolute_top_edge_scroll_enabled;
 	bool absolute_spiral_jog_enabled;
 	bool absolute_spiral_rim_enabled;
+	bool absolute_spiral_zone_invert_enabled;
 	bool swap_xy;
 
 	uint16_t active_range_x_min;

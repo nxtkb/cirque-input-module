@@ -1110,11 +1110,22 @@ static uint8_t pinnacle_absolute_spiral_mode_for_touch(const struct device *dev,
 	distance_sq = (int64_t)(x - width / 2) * (x - width / 2) +
 		      (int64_t)(y - height / 2) * (y - height / 2);
 
-	if (jog && distance_sq <= (int64_t)radius * radius) {
+	/*
+	 * Zone ownership. Default: jog owns the INSIDE of the zone radius
+	 * (room to orbit), rim owns the OUTER ring. With
+	 * absolute-spiral-zone-invert the ownership flips: jog claims the
+	 * outer ring for scrolling while the inner disc is left to rim (or
+	 * to plain pointer motion when rim is disabled).
+	 */
+	const bool jog_side = config->absolute_spiral_zone_invert_enabled
+				      ? distance_sq > (int64_t)radius * radius
+				      : distance_sq <= (int64_t)radius * radius;
+
+	if (jog && jog_side) {
 		return PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG;
 	}
 
-	if (rim && distance_sq > (int64_t)radius * radius) {
+	if (rim && !jog_side) {
 		return PINNACLE_ABSOLUTE_SPIRAL_MODE_RIM;
 	}
 
@@ -1917,7 +1928,11 @@ static int pinnacle_init(const struct device *dev)
 			DT_INST_PROP(inst, absolute_edge_motion_interval_ms),                          \
 		.absolute_edge_motion_start_ms = DT_INST_PROP(inst, absolute_edge_motion_start_ms), \
 		.absolute_scroll_zone = DT_INST_PROP(inst, absolute_scroll_zone),                   \
-		.absolute_scroll_divisor = DT_INST_PROP(inst, absolute_scroll_divisor),             		.absolute_spiral_invert_wheel_enabled =                                            			DT_INST_PROP(inst, absolute_spiral_invert_wheel),                          \
+		.absolute_scroll_divisor = DT_INST_PROP(inst, absolute_scroll_divisor),             \
+		.absolute_spiral_invert_wheel_enabled =                                             \
+			DT_INST_PROP(inst, absolute_spiral_invert_wheel),                           \
+		.absolute_spiral_zone_invert_enabled =                                              \
+			DT_INST_PROP(inst, absolute_spiral_zone_invert),                            \
 		.absolute_spiral_zone_radius = DT_INST_PROP(inst, absolute_spiral_zone_radius),     \
 		.absolute_spiral_deadzone_degrees =                                                 \
 			DT_INST_PROP(inst, absolute_spiral_deadzone_degrees),                       \
