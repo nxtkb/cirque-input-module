@@ -1632,7 +1632,6 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 							: 0;
 					drv_data->spiral_max_dist_sq =
 						(uint32_t)(dist_sq + (int64_t)band * band);
-				}
 			}
 			drv_data->spiral_engaged = false;
 			drv_data->spiral_remainder = 0;
