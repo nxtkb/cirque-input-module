@@ -182,6 +182,10 @@ Current absolute-mode behavior:
   motion. `absolute-spiral-rim-enable` does the same for touches outside the
   zone, projecting the rotation onto the wheel axes so direction follows the
   rim. `absolute-spiral-zone-radius` splits the pad (0 = whole pad is jog).
+  `absolute-spiral-zone-invert` flips that ownership: jog-wheel claims the
+  OUTER ring (rotate near the edge to scroll) and the inner disc is left
+  to rim-following — or to plain pointer motion when rim-following is
+  disabled.
   A touch only engages after rotating `absolute-spiral-deadzone-degrees`
   while staying within a radial band (~15% of the starting radius) of the
   touch-start distance from the center: straight slides drift radially,
