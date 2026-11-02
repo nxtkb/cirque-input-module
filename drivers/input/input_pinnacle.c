@@ -1043,8 +1043,8 @@ static void pinnacle_report_absolute_scroll(const struct device *dev, uint16_t p
  * pointer motion. The band is a fraction of the starting radius with a floor
  * so small-radius jogs still survive.
  */
-#define PINNACLE_SPIRAL_RADIAL_BAND_PCT 15
-#define PINNACLE_SPIRAL_RADIAL_BAND_MIN 120
+#define PINNACLE_SPIRAL_RADIAL_BAND_PCT 25
+#define PINNACLE_SPIRAL_RADIAL_BAND_MIN 180
 
 static uint16_t pinnacle_isqrt32(uint32_t value)
 {
@@ -1571,24 +1571,33 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			drv_data->absolute_tap_drag_candidate =
 				pinnacle_should_start_absolute_tap_drag(dev, sample->abs_x,
 									sample->abs_y);
-			if (drv_data->absolute_tap_drag_candidate) {
-				drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
-			} else {
+			/*
+			 * Spiral and tap-drag are co-candidates: whichever
+			 * disqualifies first loses the touch. A rotation that
+			 * stays within the radial band engages scroll; a radial
+			 * drift cancels the spiral and falls through to the
+			 * tap-drag evaluation, so post-tap touches can still
+			 * become drags — and can still scroll.
+			 */
+			drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+			if (!drv_data->absolute_tap_drag_candidate) {
 				/*
-				 * Edge scroll strips win at touch start: a slide
-				 * along an edge fails the spiral orbit test anyway
-				 * (its radius from center swings), so claiming the
+				 * Edge scroll strips win at touch start over the
+				 * spiral: a slide along an edge fails the orbit
+				 * test anyway (its radius swings), so claiming the
 				 * strip for spiral would leave it dead.
 				 */
 				drv_data->scroll_mode =
 					pinnacle_absolute_scroll_mode_for_touch(dev, sample->abs_x,
 										sample->abs_y);
-				if (drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {
-					drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
-				} else {
+			} else {
+				drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
+			}
+			if (drv_data->scroll_mode == PINNACLE_ABSOLUTE_SCROLL_NONE) {
 				drv_data->spiral_mode = pinnacle_absolute_spiral_mode_for_touch(
 					dev, sample->abs_x, sample->abs_y);
-				if (drv_data->spiral_mode != PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE) {
+			}
+			if (drv_data->spiral_mode != PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE) {
 					int32_t sx;
 					int32_t sy;
 					int32_t swidth;
@@ -1619,7 +1628,6 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 							: 0;
 					drv_data->spiral_max_dist_sq =
 						(uint32_t)(dist_sq + (int64_t)band * band);
-				}
 				}
 			}
 			drv_data->spiral_engaged = false;
