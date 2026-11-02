@@ -1036,6 +1036,31 @@ static void pinnacle_report_absolute_scroll(const struct device *dev, uint16_t p
 	}
 }
 
+/*
+ * A spiral touch only stays a spiral touch while the finger orbits the pad
+ * center at a roughly constant radius. A straight slide drifts far from its
+ * starting radius and cancels the gesture, handing the touch back to normal
+ * pointer motion. The band is a fraction of the starting radius with a floor
+ * so small-radius jogs still survive.
+ */
+#define PINNACLE_SPIRAL_RADIAL_BAND_PCT 15
+#define PINNACLE_SPIRAL_RADIAL_BAND_MIN 120
+
+static uint16_t pinnacle_isqrt32(uint32_t value)
+{
+	uint32_t result = value;
+	uint32_t next = (result + 1) / 2;
+
+	if (value == 0) {
+		return 0;
+	}
+	while (next < result) {
+		result = next;
+		next = (result + value / result) / 2;
+	}
+	return (uint16_t)result;
+}
+
 static int32_t pinnacle_absolute_spiral_angle(const struct device *dev, uint16_t raw_x,
 					      uint16_t raw_y)
 {
@@ -1092,7 +1117,13 @@ static uint8_t pinnacle_absolute_spiral_mode_for_touch(const struct device *dev,
 	return PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
 }
 
-static void pinnacle_report_absolute_spiral(const struct device *dev, uint16_t current_raw_x,
+/*
+ * Feed one sample into the spiral gesture. Returns false when the touch was
+ * rejected as a spiral (radius drifted before the dead-zone was crossed), in
+ * which case the caller must let the sample fall through to normal pointer
+ * motion. Once engaged, the touch scrolls until the finger lifts.
+ */
+static bool pinnacle_report_absolute_spiral(const struct device *dev, uint16_t current_raw_x,
 					    uint16_t current_raw_y)
 {
 	const struct pinnacle_config *config = dev->config;
@@ -1100,18 +1131,36 @@ static void pinnacle_report_absolute_spiral(const struct device *dev, uint16_t c
 	int32_t angle;
 	int32_t delta;
 
+	if (!drv_data->spiral_engaged) {
+		int32_t x;
+		int32_t y;
+		int32_t width;
+		int32_t height;
+		int64_t dist_sq;
+
+		pinnacle_absolute_logical_position(config, current_raw_x, current_raw_y, &x, &y,
+						   &width, &height);
+		x -= width / 2;
+		y -= height / 2;
+		dist_sq = (int64_t)x * x + (int64_t)y * y;
+		if (dist_sq < (int64_t)drv_data->spiral_min_dist_sq ||
+		    dist_sq > (int64_t)drv_data->spiral_max_dist_sq) {
+			return false;
+		}
+	}
+
 	angle = pinnacle_absolute_spiral_angle(dev, current_raw_x, current_raw_y);
 	delta = pinnacle_spiral_delta_mdeg(angle, drv_data->spiral_prev_angle_mdeg);
 	drv_data->spiral_prev_angle_mdeg = angle;
-	drv_data->spiral_accum_mdeg += pinnacle_abs32(delta);
+	drv_data->spiral_net_mdeg += delta;
 
 	if (!drv_data->spiral_engaged) {
-		if (drv_data->spiral_accum_mdeg >=
+		if (pinnacle_abs32(drv_data->spiral_net_mdeg) >=
 		    (int32_t)config->absolute_spiral_deadzone_degrees * 1000) {
 			drv_data->spiral_engaged = true;
 			drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_SPIRAL;
 		}
-		return;
+		return true;
 	}
 
 	if (drv_data->spiral_mode == PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG) {
@@ -1147,6 +1196,8 @@ static void pinnacle_report_absolute_spiral(const struct device *dev, uint16_t c
 					    CLAMP(ticks, INT16_MIN, INT16_MAX), true);
 		}
 	}
+
+	return true;
 }
 
 static void pinnacle_schedule_absolute_edge_motion(const struct device *dev)
@@ -1269,7 +1320,7 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	drv_data->spiral_candidate = false;
 	drv_data->spiral_engaged = false;
 	drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
-	drv_data->spiral_accum_mdeg = 0;
+	drv_data->spiral_net_mdeg = 0;
 	drv_data->spiral_remainder = 0;
 	drv_data->spiral_rim_remainder_x = 0;
 	drv_data->spiral_rim_remainder_y = 0;
@@ -1342,7 +1393,7 @@ static void pinnacle_clear_runtime_state(const struct device *dev)
 	drv_data->spiral_candidate = false;
 	drv_data->spiral_engaged = false;
 	drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
-	drv_data->spiral_accum_mdeg = 0;
+	drv_data->spiral_net_mdeg = 0;
 	drv_data->spiral_remainder = 0;
 	drv_data->spiral_rim_remainder_x = 0;
 	drv_data->spiral_rim_remainder_y = 0;
@@ -1527,15 +1578,39 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 				drv_data->spiral_mode = pinnacle_absolute_spiral_mode_for_touch(
 					dev, sample->abs_x, sample->abs_y);
 				if (drv_data->spiral_mode != PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE) {
+					int32_t sx;
+					int32_t sy;
+					int32_t swidth;
+					int32_t sheight;
+					int64_t dist_sq;
+					uint16_t band;
+
 					drv_data->spiral_candidate = true;
 					drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 					drv_data->spiral_prev_angle_mdeg =
 						pinnacle_absolute_spiral_angle(dev, sample->abs_x,
 									       sample->abs_y);
+					pinnacle_absolute_logical_position(config, sample->abs_x,
+									   sample->abs_y, &sx, &sy,
+									   &swidth, &sheight);
+					sx -= swidth / 2;
+					sy -= sheight / 2;
+					dist_sq = (int64_t)sx * sx + (int64_t)sy * sy;
+					band = MAX(PINNACLE_SPIRAL_RADIAL_BAND_MIN,
+						   (uint16_t)(pinnacle_isqrt32((uint32_t)dist_sq) *
+							      PINNACLE_SPIRAL_RADIAL_BAND_PCT /
+							      100));
+					drv_data->spiral_net_mdeg = 0;
+					drv_data->spiral_min_dist_sq =
+						dist_sq > (int64_t)band * band
+							? (uint32_t)(dist_sq -
+								     (int64_t)band * band)
+							: 0;
+					drv_data->spiral_max_dist_sq =
+						(uint32_t)(dist_sq + (int64_t)band * band);
 				}
 			}
 			drv_data->spiral_engaged = false;
-			drv_data->spiral_accum_mdeg = 0;
 			drv_data->spiral_remainder = 0;
 			drv_data->spiral_rim_remainder_x = 0;
 			drv_data->spiral_rim_remainder_y = 0;
@@ -1557,12 +1632,23 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 		}
 
 		if (drv_data->spiral_candidate) {
-			pinnacle_report_absolute_spiral(dev, sample->abs_x, sample->abs_y);
-			drv_data->previous_abs_x = sample->abs_x;
-			drv_data->previous_abs_y = sample->abs_y;
-			drv_data->touch_current_x = sample->abs_x;
-			drv_data->touch_current_y = sample->abs_y;
-			return 0;
+			if (pinnacle_report_absolute_spiral(dev, sample->abs_x, sample->abs_y)) {
+				drv_data->previous_abs_x = sample->abs_x;
+				drv_data->previous_abs_y = sample->abs_y;
+				drv_data->touch_current_x = sample->abs_x;
+				drv_data->touch_current_y = sample->abs_y;
+				return 0;
+			}
+
+			/*
+			 * Rejected: the finger drifted radially, so this was a
+			 * slide, not an orbit. Drop the spiral state and let the
+			 * sample continue into the normal pointer path below;
+			 * previous_abs still tracks the last swallowed sample so
+			 * the next delta is correct.
+			 */
+			drv_data->spiral_candidate = false;
+			drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
 		}
 
 		if (drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {

@@ -271,7 +271,9 @@ struct pinnacle_data {
 	bool spiral_engaged;
 	uint8_t spiral_mode;
 	int32_t spiral_prev_angle_mdeg;
-	int32_t spiral_accum_mdeg;
+	int32_t spiral_net_mdeg;
+	uint32_t spiral_min_dist_sq;
+	uint32_t spiral_max_dist_sq;
 	int64_t spiral_remainder;
 	int64_t spiral_rim_remainder_x;
 	int64_t spiral_rim_remainder_y;
