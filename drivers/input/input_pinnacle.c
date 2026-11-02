@@ -640,6 +640,10 @@ static void pinnacle_apply_absolute_transform(const struct pinnacle_config *conf
 	if (config->invert_x) {
 		*delta_x = -*delta_x;
 	}
+
+	if (config->invert_y) {
+		*delta_y = -*delta_y;
+	}
 }
 
 static int32_t pinnacle_abs32(int32_t value)
