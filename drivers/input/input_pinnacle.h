@@ -216,6 +216,7 @@ struct pinnacle_config {
 	bool primary_tap_enabled;
 	bool glide_extend_enabled;
 	bool absolute_tap_drag_enabled;
+	bool absolute_spiral_invert_wheel_enabled;
 	bool absolute_edge_motion_enabled;
 	bool absolute_right_edge_scroll_enabled;
 	bool absolute_top_edge_scroll_enabled;

@@ -187,6 +187,9 @@ Current absolute-mode behavior:
   touch-start distance from the center: straight slides drift radially,
   cancel the gesture, and fall through to normal pointer motion, so taps and
   drags keep working when the gesture is always on.
+- `absolute-spiral-invert-wheel` flips the spiral scroll direction. Edge
+  scroll strips keep priority at touch start over the spiral gesture, so the
+  outer strips scroll linearly while the rest of the pad jogs.
 - `absolute-secondary-tap-corner` selects which raw-coordinate corner the
   secondary-tap area occupies: `lower-right` (default), `lower-left`,
   `upper-right`, or `upper-left`. Pick the corner that matches the physical

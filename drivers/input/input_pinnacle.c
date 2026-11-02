@@ -1166,6 +1166,9 @@ static bool pinnacle_report_absolute_spiral(const struct device *dev, uint16_t c
 	if (drv_data->spiral_mode == PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG) {
 		int32_t ticks;
 
+		if (config->absolute_spiral_invert_wheel_enabled) {
+			delta = -delta;
+		}
 		drv_data->spiral_remainder += delta * config->absolute_spiral_ticks_per_rev;
 		ticks = pinnacle_spiral_accum_ticks(&drv_data->spiral_remainder, 360000);
 		if (ticks != 0) {
@@ -1571,10 +1574,18 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			if (drv_data->absolute_tap_drag_candidate) {
 				drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 			} else {
+				/*
+				 * Edge scroll strips win at touch start: a slide
+				 * along an edge fails the spiral orbit test anyway
+				 * (its radius from center swings), so claiming the
+				 * strip for spiral would leave it dead.
+				 */
 				drv_data->scroll_mode =
 					pinnacle_absolute_scroll_mode_for_touch(dev, sample->abs_x,
 										sample->abs_y);
-				/* Spiral candidate suppresses edge scroll classification. */
+				if (drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE) {
+					drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+				} else {
 				drv_data->spiral_mode = pinnacle_absolute_spiral_mode_for_touch(
 					dev, sample->abs_x, sample->abs_y);
 				if (drv_data->spiral_mode != PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE) {
@@ -1608,6 +1619,7 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 							: 0;
 					drv_data->spiral_max_dist_sq =
 						(uint32_t)(dist_sq + (int64_t)band * band);
+				}
 				}
 			}
 			drv_data->spiral_engaged = false;
@@ -1894,7 +1906,7 @@ static int pinnacle_init(const struct device *dev)
 			DT_INST_PROP(inst, absolute_edge_motion_interval_ms),                          \
 		.absolute_edge_motion_start_ms = DT_INST_PROP(inst, absolute_edge_motion_start_ms), \
 		.absolute_scroll_zone = DT_INST_PROP(inst, absolute_scroll_zone),                   \
-		.absolute_scroll_divisor = DT_INST_PROP(inst, absolute_scroll_divisor),             \
+		.absolute_scroll_divisor = DT_INST_PROP(inst, absolute_scroll_divisor),             		.absolute_spiral_invert_wheel_enabled =                                            			DT_INST_PROP(inst, absolute_spiral_invert_wheel),                          \
 		.absolute_spiral_zone_radius = DT_INST_PROP(inst, absolute_spiral_zone_radius),     \
 		.absolute_spiral_deadzone_degrees =                                                 \
 			DT_INST_PROP(inst, absolute_spiral_deadzone_degrees),                       \
