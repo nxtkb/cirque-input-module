@@ -176,6 +176,11 @@ Current absolute-mode behavior:
 - `absolute-secondary-tap-area-width`, `absolute-secondary-tap-area-height`,
   `absolute-aux-tap-area-width`, and `absolute-aux-tap-area-height` define
   optional corner tap zones. A width or height of 0 disables that zone.
+- `absolute-secondary-tap-corner` selects which raw-coordinate corner the
+  secondary-tap area occupies: `lower-right` (default), `lower-left`,
+  `upper-right`, or `upper-left`. Pick the corner that matches the physical
+  pad orientation so right-click taps land where expected on rotated
+  mountings; the auxiliary-tap zone (upper-left) is unaffected.
 - `absolute-relative-multiplier` and `absolute-relative-divisor` tune cursor
   scale. Increase the divisor for slower movement; decrease it for faster
   movement.

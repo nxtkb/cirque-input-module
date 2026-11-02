@@ -170,6 +170,13 @@ enum pinnacle_absolute_scroll_mode {
 #define PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG  1
 #define PINNACLE_ABSOLUTE_SPIRAL_MODE_RIM  2
 
+enum pinnacle_absolute_tap_corner {
+	PINNACLE_ABSOLUTE_TAP_CORNER_LOWER_RIGHT,
+	PINNACLE_ABSOLUTE_TAP_CORNER_LOWER_LEFT,
+	PINNACLE_ABSOLUTE_TAP_CORNER_UPPER_RIGHT,
+	PINNACLE_ABSOLUTE_TAP_CORNER_UPPER_LEFT,
+};
+
 struct pinnacle_config {
 	const struct pinnacle_bus bus;
 	struct gpio_dt_spec dr_gpio;
@@ -189,6 +196,7 @@ struct pinnacle_config {
 	uint16_t absolute_tap_drag_max_movement;
 	uint16_t absolute_secondary_tap_area_width;
 	uint16_t absolute_secondary_tap_area_height;
+	enum pinnacle_absolute_tap_corner absolute_secondary_tap_corner;
 	uint16_t absolute_aux_tap_area_width;
 	uint16_t absolute_aux_tap_area_height;
 	uint16_t absolute_edge_motion_zone;

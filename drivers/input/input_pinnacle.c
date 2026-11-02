@@ -778,8 +778,8 @@ static uint16_t pinnacle_abs_bottom(const struct pinnacle_config *config)
 	return config->active_range_y_max;
 }
 
-static bool pinnacle_absolute_point_in_lower_right(const struct pinnacle_config *config,
-						  uint16_t x, uint16_t y)
+static bool pinnacle_absolute_point_in_secondary(const struct pinnacle_config *config,
+						 uint16_t x, uint16_t y)
 {
 	if (config->absolute_secondary_tap_area_width == 0 ||
 	    config->absolute_secondary_tap_area_height == 0) {
@@ -790,10 +790,22 @@ static bool pinnacle_absolute_point_in_lower_right(const struct pinnacle_config 
 	int32_t left = pinnacle_abs_left(config);
 	int32_t top = pinnacle_abs_top(config);
 	int32_t bottom = pinnacle_abs_bottom(config);
-	int32_t left_boundary = MAX(left, right - config->absolute_secondary_tap_area_width);
-	int32_t top_boundary = MAX(top, bottom - config->absolute_secondary_tap_area_height);
+	int32_t left_boundary = MIN(right, left + config->absolute_secondary_tap_area_width);
+	int32_t right_boundary = MAX(left, right - config->absolute_secondary_tap_area_width);
+	int32_t top_boundary = MIN(bottom, top + config->absolute_secondary_tap_area_height);
+	int32_t bottom_boundary = MAX(top, bottom - config->absolute_secondary_tap_area_height);
 
-	return x >= left_boundary && y >= top_boundary;
+	switch (config->absolute_secondary_tap_corner) {
+	case PINNACLE_ABSOLUTE_TAP_CORNER_LOWER_LEFT:
+		return x <= left_boundary && y >= bottom_boundary;
+	case PINNACLE_ABSOLUTE_TAP_CORNER_UPPER_RIGHT:
+		return x >= right_boundary && y <= top_boundary;
+	case PINNACLE_ABSOLUTE_TAP_CORNER_UPPER_LEFT:
+		return x <= left_boundary && y <= top_boundary;
+	case PINNACLE_ABSOLUTE_TAP_CORNER_LOWER_RIGHT:
+	default:
+		return x >= right_boundary && y >= bottom_boundary;
+	}
 }
 
 static bool pinnacle_absolute_point_in_upper_left(const struct pinnacle_config *config,
@@ -1199,7 +1211,7 @@ static uint16_t pinnacle_absolute_tap_code(const struct device *dev, uint16_t x,
 {
 	const struct pinnacle_config *config = dev->config;
 
-	if (pinnacle_absolute_point_in_lower_right(config, x, y)) {
+	if (pinnacle_absolute_point_in_secondary(config, x, y)) {
 		return INPUT_BTN_0 + 1;
 	}
 
@@ -1786,6 +1798,8 @@ static int pinnacle_init(const struct device *dev)
 			DT_INST_PROP(inst, absolute_secondary_tap_area_width),                       \
 		.absolute_secondary_tap_area_height =                                              \
 			DT_INST_PROP(inst, absolute_secondary_tap_area_height),                      \
+		.absolute_secondary_tap_corner =                                                   \
+			DT_INST_ENUM_IDX(inst, absolute_secondary_tap_corner),                       \
 		.absolute_aux_tap_area_width = DT_INST_PROP(inst, absolute_aux_tap_area_width),     \
 		.absolute_aux_tap_area_height = DT_INST_PROP(inst, absolute_aux_tap_area_height),   \
 		.absolute_edge_motion_zone = DT_INST_PROP(inst, absolute_edge_motion_zone),         \

@@ -131,6 +131,20 @@ properties:
       Height of the lower-right software secondary-tap area in absolute
       coordinates. Set to 0 to disable secondary tap detection.
 
+  absolute-secondary-tap-corner:
+    type: string
+    default: "lower-right"
+    description: |
+      Which raw-coordinate corner the secondary-tap area occupies. Select a
+      different corner when the pad is mounted rotated so the right-click tap
+      zone lands at the physically expected location. The auxiliary-tap zone
+      (upper-left) is unaffected by this setting.
+    enum:
+      - "lower-right"
+      - "lower-left"
+      - "upper-right"
+      - "upper-left"
+
   absolute-aux-tap-area-width:
     type: int
     default: 0
