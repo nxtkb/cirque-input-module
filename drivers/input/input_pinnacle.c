@@ -940,7 +940,7 @@ static void pinnacle_absolute_edge_motion_delta_from_vector(const struct pinnacl
 }
 
 static void pinnacle_absolute_edge_motion_delta(const struct device *dev, int32_t *delta_x,
-					       int32_t *delta_y)
+						       int32_t *delta_y)
 {
 	const struct pinnacle_config *config = dev->config;
 	int64_t norm_x;
@@ -954,6 +954,18 @@ static void pinnacle_absolute_edge_motion_delta(const struct device *dev, int32_
 	}
 
 	pinnacle_absolute_edge_motion_delta_from_vector(config, norm_x, norm_y, delta_x, delta_y);
+
+	/*
+	 * The pan vector is derived from the logical frame, which already
+	 * carries swap-xy and invert-x but NOT invert-y (logical_position
+	 * never applies it). The pointer delta path applies invert-y in
+	 * pinnacle_apply_absolute_transform(); mirror the pan's Y here too so
+	 * a 180-degree mount pans in the direction the finger pushes instead
+	 * of against it.
+	 */
+	if (config->invert_y) {
+		*delta_y = -*delta_y;
+	}
 }
 
 static enum pinnacle_absolute_scroll_mode
