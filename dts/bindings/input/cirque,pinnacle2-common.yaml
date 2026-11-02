@@ -205,6 +205,49 @@ properties:
       Coordinate delta divisor used when converting absolute edge movement to
       wheel ticks. Increase this value to make edge scrolling slower.
 
+  absolute-spiral-jog-enable:
+    type: boolean
+    description: |
+      In absolute mode, treat touches starting inside the spiral zone radius
+      as jog-wheel rotation: angular movement around the pad center emits
+      INPUT_REL_WHEEL ticks proportional to the rotation angle. Rotation
+      suppresses edge motion and pointer movement for those touches. Takes
+      priority over edge scrolling for spiral touches.
+
+  absolute-spiral-rim-enable:
+    type: boolean
+    description: |
+      In absolute mode, treat touches starting outside the spiral zone radius
+      as rim-following rotation: angular movement around the pad center emits
+      wheel ticks following the tangential direction of the rotation.
+      Rotation suppresses edge motion and pointer movement for those
+      touches. Takes priority over edge scrolling for spiral touches.
+
+  absolute-spiral-zone-radius:
+    type: int
+    default: 0
+    description: |
+      Radius from the logical pad center, in logical coordinates, separating
+      jog-wheel touches from rim-following touches. Touches starting inside
+      engage jog-wheel scrolling when absolute-spiral-jog-enable is set;
+      touches starting outside engage rim-following scrolling when
+      absolute-spiral-rim-enable is set. Set to 0 to treat the whole pad as
+      jog-wheel.
+
+  absolute-spiral-deadzone-degrees:
+    type: int
+    default: 25
+    description: |
+      Accumulated rotation in degrees required before a spiral touch starts
+      emitting wheel events. Touches rotated less than this still register
+      as taps on lift.
+
+  absolute-spiral-ticks-per-rev:
+    type: int
+    default: 32
+    description: |
+      Number of wheel ticks emitted for one full 360 degree rotation.
+
   glide-extend-enable:
     type: boolean
     description: |

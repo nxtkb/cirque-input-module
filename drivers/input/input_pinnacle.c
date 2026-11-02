@@ -647,6 +647,117 @@ static int32_t pinnacle_abs32(int32_t value)
 	return value < 0 ? -value : value;
 }
 
+/* 180000 / pi, used to convert radians to millidegrees */
+#define PINNACLE_SPIRAL_MDEG_PER_RAD 57296
+
+/*
+ * Integer-only atan2 returning the angle in millidegrees in the range
+ * (-180000, 180000]. Uses the quadrant-reduced rational approximation
+ * atan(z) ~= z / (1 + 0.28 * z^2), which stays within about half a degree.
+ */
+static int32_t pinnacle_atan2_mdeg(int32_t y, int32_t x)
+{
+	bool negate = false;
+	int32_t angle;
+
+	if (y == 0 && x == 0) {
+		return 0;
+	}
+
+	if (y < 0) {
+		negate = true;
+		y = -y;
+	}
+
+	if (pinnacle_abs32(x) >= y) {
+		angle = (int32_t)((int64_t)y * x * PINNACLE_SPIRAL_MDEG_PER_RAD /
+				  ((int64_t)x * x + ((int64_t)y * y * 28) / 100));
+		if (x < 0) {
+			angle += 180000;
+		}
+	} else {
+		/* atan(y / x) = 90 deg - atan(x / y) for |y| > |x| */
+		angle = 90000 - (int32_t)((int64_t)y * x * PINNACLE_SPIRAL_MDEG_PER_RAD /
+					  ((int64_t)y * y + ((int64_t)x * x * 28) / 100));
+	}
+
+	return negate ? -angle : angle;
+}
+
+/*
+ * Angular delta between consecutive samples, wrapped into (-180000, 180000]
+ * so rotation across the +/-180 degree boundary stays continuous.
+ */
+static int32_t pinnacle_spiral_delta_mdeg(int32_t current_mdeg, int32_t previous_mdeg)
+{
+	int32_t delta = current_mdeg - previous_mdeg;
+
+	if (delta > 180000) {
+		delta -= 360000;
+	} else if (delta <= -180000) {
+		delta += 360000;
+	}
+
+	return delta;
+}
+
+/* Cosine table for 0 to 90 degrees in 10 degree steps, scaled by 1000. */
+static const int16_t pinnacle_spiral_cos1000_table[10] = {1000, 985, 940, 866, 766,
+							  643, 500, 342, 174, 0};
+
+static int32_t pinnacle_spiral_cos1000(int32_t angle_mdeg)
+{
+	bool negate = false;
+	int32_t cos_start;
+	int32_t cos_end;
+	int32_t cos_value;
+	int32_t step;
+	int32_t frac;
+
+	angle_mdeg %= 360000;
+	if (angle_mdeg < 0) {
+		angle_mdeg += 360000;
+	}
+	if (angle_mdeg >= 180000) {
+		negate = !negate;
+		angle_mdeg -= 180000;
+	}
+	if (angle_mdeg > 90000) {
+		/* cos(180 deg - x) = -cos(x) */
+		negate = !negate;
+		angle_mdeg = 180000 - angle_mdeg;
+	}
+
+	step = angle_mdeg / 10000;
+	frac = (angle_mdeg % 10000) / 10;
+	cos_start = pinnacle_spiral_cos1000_table[step];
+	cos_end = step < 9 ? pinnacle_spiral_cos1000_table[step + 1] : 0;
+	cos_value = cos_start + ((cos_end - cos_start) * frac) / 1000;
+
+	return negate ? -cos_value : cos_value;
+}
+
+static int32_t pinnacle_spiral_sin1000(int32_t angle_mdeg)
+{
+	return pinnacle_spiral_cos1000(angle_mdeg - 90000);
+}
+
+/*
+ * Drain accumulated fractional ticks from accum, rounding to the nearest
+ * whole tick and keeping the signed remainder for the next sample.
+ */
+static int32_t pinnacle_spiral_accum_ticks(int64_t *accum, int64_t ticks_per_denom)
+{
+	int64_t total = *accum >= 0 ? *accum + ticks_per_denom / 2
+				    : *accum - ticks_per_denom / 2;
+	int64_t ticks;
+
+	ticks = total / ticks_per_denom;
+	*accum -= ticks * ticks_per_denom;
+
+	return (int32_t)ticks;
+}
+
 static uint16_t pinnacle_abs_left(const struct pinnacle_config *config)
 {
 	return config->active_range_x_min;
@@ -913,6 +1024,119 @@ static void pinnacle_report_absolute_scroll(const struct device *dev, uint16_t p
 	}
 }
 
+static int32_t pinnacle_absolute_spiral_angle(const struct device *dev, uint16_t raw_x,
+					      uint16_t raw_y)
+{
+	const struct pinnacle_config *config = dev->config;
+	int32_t x;
+	int32_t y;
+	int32_t width;
+	int32_t height;
+
+	pinnacle_absolute_logical_position(config, raw_x, raw_y, &x, &y, &width, &height);
+
+	return pinnacle_atan2_mdeg(y - height / 2, x - width / 2);
+}
+
+/*
+ * Classify a touch start as spiral jog-wheel (1), rim-following (2), or not a
+ * spiral touch (0). Touches starting inside the spiral zone radius engage jog
+ * when enabled, touches outside engage rim when enabled. A zone radius of 0
+ * makes the whole pad jog-wheel.
+ */
+static uint8_t pinnacle_absolute_spiral_mode_for_touch(const struct device *dev, uint16_t raw_x,
+						       uint16_t raw_y)
+{
+	const struct pinnacle_config *config = dev->config;
+	bool jog = config->absolute_spiral_jog_enabled;
+	bool rim = config->absolute_spiral_rim_enabled;
+	int32_t x;
+	int32_t y;
+	int32_t width;
+	int32_t height;
+	int32_t radius = config->absolute_spiral_zone_radius;
+	int64_t distance_sq;
+
+	if (!jog && !rim) {
+		return PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+	}
+
+	if (radius == 0) {
+		return jog ? PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG : PINNACLE_ABSOLUTE_SPIRAL_MODE_RIM;
+	}
+
+	pinnacle_absolute_logical_position(config, raw_x, raw_y, &x, &y, &width, &height);
+	distance_sq = (int64_t)(x - width / 2) * (x - width / 2) +
+		      (int64_t)(y - height / 2) * (y - height / 2);
+
+	if (jog && distance_sq <= (int64_t)radius * radius) {
+		return PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG;
+	}
+
+	if (rim && distance_sq > (int64_t)radius * radius) {
+		return PINNACLE_ABSOLUTE_SPIRAL_MODE_RIM;
+	}
+
+	return PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+}
+
+static void pinnacle_report_absolute_spiral(const struct device *dev, uint16_t current_raw_x,
+					    uint16_t current_raw_y)
+{
+	const struct pinnacle_config *config = dev->config;
+	struct pinnacle_data *drv_data = dev->data;
+	int32_t angle;
+	int32_t delta;
+
+	angle = pinnacle_absolute_spiral_angle(dev, current_raw_x, current_raw_y);
+	delta = pinnacle_spiral_delta_mdeg(angle, drv_data->spiral_prev_angle_mdeg);
+	drv_data->spiral_prev_angle_mdeg = angle;
+	drv_data->spiral_accum_mdeg += pinnacle_abs32(delta);
+
+	if (!drv_data->spiral_engaged) {
+		if (drv_data->spiral_accum_mdeg >=
+		    (int32_t)config->absolute_spiral_deadzone_degrees * 1000) {
+			drv_data->spiral_engaged = true;
+			drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_SPIRAL;
+		}
+		return;
+	}
+
+	if (drv_data->spiral_mode == PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG) {
+		int32_t ticks;
+
+		drv_data->spiral_remainder += delta * config->absolute_spiral_ticks_per_rev;
+		ticks = pinnacle_spiral_accum_ticks(&drv_data->spiral_remainder, 360000);
+		if (ticks != 0) {
+			pinnacle_report_rel(dev, INPUT_REL_WHEEL,
+					    CLAMP(ticks, INT16_MIN, INT16_MAX), true);
+		}
+	} else {
+		/*
+		 * Project the rotation onto the wheel axes using the current
+		 * angle so the scroll direction follows the rim.
+		 */
+		int64_t wheel = (int64_t)delta * config->absolute_spiral_ticks_per_rev *
+				pinnacle_spiral_cos1000(angle);
+		int64_t hwheel = -(int64_t)delta * config->absolute_spiral_ticks_per_rev *
+				 pinnacle_spiral_sin1000(angle);
+		int32_t ticks;
+
+		drv_data->spiral_rim_remainder_x += wheel;
+		ticks = pinnacle_spiral_accum_ticks(&drv_data->spiral_rim_remainder_x, 360000000);
+		if (ticks != 0) {
+			pinnacle_report_rel(dev, INPUT_REL_WHEEL,
+					    CLAMP(ticks, INT16_MIN, INT16_MAX), true);
+		}
+		drv_data->spiral_rim_remainder_y += hwheel;
+		ticks = pinnacle_spiral_accum_ticks(&drv_data->spiral_rim_remainder_y, 360000000);
+		if (ticks != 0) {
+			pinnacle_report_rel(dev, INPUT_REL_HWHEEL,
+					    CLAMP(ticks, INT16_MIN, INT16_MAX), true);
+		}
+	}
+}
+
 static void pinnacle_schedule_absolute_edge_motion(const struct device *dev)
 {
 	const struct pinnacle_config *config = dev->config;
@@ -1028,6 +1252,24 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 	drv_data->scroll_remainder = 0;
 
+	bool spiral_engaged = drv_data->spiral_candidate && drv_data->spiral_engaged;
+
+	drv_data->spiral_candidate = false;
+	drv_data->spiral_engaged = false;
+	drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+	drv_data->spiral_accum_mdeg = 0;
+	drv_data->spiral_remainder = 0;
+	drv_data->spiral_rim_remainder_x = 0;
+	drv_data->spiral_rim_remainder_y = 0;
+
+	/* Engaged spiral touches skip tap classification; unengaged ones fall through. */
+	if (spiral_engaged) {
+		drv_data->touching = false;
+		drv_data->absolute_tap_drag_candidate = false;
+		drv_data->absolute_motion_started = false;
+		return;
+	}
+
 	int64_t duration_ms = k_uptime_get() - drv_data->touch_start_time_ms;
 	int32_t movement_x = pinnacle_abs32((int32_t)drv_data->previous_abs_x -
 					     (int32_t)drv_data->touch_start_abs_x);
@@ -1085,6 +1327,13 @@ static void pinnacle_clear_runtime_state(const struct device *dev)
 	drv_data->absolute_motion_started = false;
 	drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
 	drv_data->scroll_remainder = 0;
+	drv_data->spiral_candidate = false;
+	drv_data->spiral_engaged = false;
+	drv_data->spiral_mode = PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE;
+	drv_data->spiral_accum_mdeg = 0;
+	drv_data->spiral_remainder = 0;
+	drv_data->spiral_rim_remainder_x = 0;
+	drv_data->spiral_rim_remainder_y = 0;
 	drv_data->last_tap_time_ms = 0;
 	drv_data->last_tap_code = 0;
 }
@@ -1252,6 +1501,7 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 
 			drv_data->touching = true;
 			drv_data->tap_dragging = false;
+			drv_data->spiral_candidate = false;
 			drv_data->absolute_tap_drag_candidate =
 				pinnacle_should_start_absolute_tap_drag(dev, sample->abs_x,
 									sample->abs_y);
@@ -1261,7 +1511,22 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 				drv_data->scroll_mode =
 					pinnacle_absolute_scroll_mode_for_touch(dev, sample->abs_x,
 										sample->abs_y);
+				/* Spiral candidate suppresses edge scroll classification. */
+				drv_data->spiral_mode = pinnacle_absolute_spiral_mode_for_touch(
+					dev, sample->abs_x, sample->abs_y);
+				if (drv_data->spiral_mode != PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE) {
+					drv_data->spiral_candidate = true;
+					drv_data->scroll_mode = PINNACLE_ABSOLUTE_SCROLL_NONE;
+					drv_data->spiral_prev_angle_mdeg =
+						pinnacle_absolute_spiral_angle(dev, sample->abs_x,
+									       sample->abs_y);
+				}
 			}
+			drv_data->spiral_engaged = false;
+			drv_data->spiral_accum_mdeg = 0;
+			drv_data->spiral_remainder = 0;
+			drv_data->spiral_rim_remainder_x = 0;
+			drv_data->spiral_rim_remainder_y = 0;
 			drv_data->absolute_motion_started =
 				drv_data->scroll_mode != PINNACLE_ABSOLUTE_SCROLL_NONE;
 			drv_data->scroll_remainder = 0;
@@ -1276,6 +1541,15 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 			if (drv_data->absolute_motion_started) {
 				pinnacle_schedule_absolute_edge_motion(dev);
 			}
+			return 0;
+		}
+
+		if (drv_data->spiral_candidate) {
+			pinnacle_report_absolute_spiral(dev, sample->abs_x, sample->abs_y);
+			drv_data->previous_abs_x = sample->abs_x;
+			drv_data->previous_abs_y = sample->abs_y;
+			drv_data->touch_current_x = sample->abs_x;
+			drv_data->touch_current_y = sample->abs_y;
 			return 0;
 		}
 
@@ -1521,6 +1795,11 @@ static int pinnacle_init(const struct device *dev)
 		.absolute_edge_motion_start_ms = DT_INST_PROP(inst, absolute_edge_motion_start_ms), \
 		.absolute_scroll_zone = DT_INST_PROP(inst, absolute_scroll_zone),                   \
 		.absolute_scroll_divisor = DT_INST_PROP(inst, absolute_scroll_divisor),             \
+		.absolute_spiral_zone_radius = DT_INST_PROP(inst, absolute_spiral_zone_radius),     \
+		.absolute_spiral_deadzone_degrees =                                                 \
+			DT_INST_PROP(inst, absolute_spiral_deadzone_degrees),                       \
+		.absolute_spiral_ticks_per_rev =                                                    \
+			DT_INST_PROP(inst, absolute_spiral_ticks_per_rev),                          \
 		.sleep_mode_enable = DT_INST_PROP(inst, sleep_mode_enable),                        \
 		.clipping_enabled = DT_INST_PROP(inst, clipping_enable),                           \
 		.active_range_x_min = DT_INST_PROP(inst, active_range_x_min),                      \
@@ -1540,6 +1819,8 @@ static int pinnacle_init(const struct device *dev)
 			DT_INST_PROP(inst, absolute_right_edge_scroll_enable),                         \
 		.absolute_top_edge_scroll_enabled =                                              \
 			DT_INST_PROP(inst, absolute_top_edge_scroll_enable),                           \
+		.absolute_spiral_jog_enabled = DT_INST_PROP(inst, absolute_spiral_jog_enable),     \
+		.absolute_spiral_rim_enabled = DT_INST_PROP(inst, absolute_spiral_rim_enable),     \
 		.swap_xy = DT_INST_PROP(inst, swap_xy),                                            \
 	};                                                                                         \
 	static struct pinnacle_data pinnacle_data_##inst;                                          \
@@ -1600,6 +1881,12 @@ static int pinnacle_init(const struct device *dev)
 	BUILD_ASSERT(IN_RANGE(DT_INST_PROP(inst, absolute_scroll_zone), 0, UINT16_MAX),          \
 		     "absolute-scroll-zone must be in range [0:65535]");                         \
 	BUILD_ASSERT(IN_RANGE(DT_INST_PROP(inst, absolute_scroll_divisor), 1, UINT16_MAX),       \
-		     "absolute-scroll-divisor must be in range [1:65535]");
+		     "absolute-scroll-divisor must be in range [1:65535]");                      \
+	BUILD_ASSERT(IN_RANGE(DT_INST_PROP(inst, absolute_spiral_deadzone_degrees), 0, 359),     \
+		     "absolute-spiral-deadzone-degrees must be in range [0:359]");               \
+	BUILD_ASSERT(IN_RANGE(DT_INST_PROP(inst, absolute_spiral_ticks_per_rev), 1, 1000),       \
+		     "absolute-spiral-ticks-per-rev must be in range [1:1000]");                 \
+	BUILD_ASSERT(IN_RANGE(DT_INST_PROP(inst, absolute_spiral_zone_radius), 0, UINT16_MAX),   \
+		     "absolute-spiral-zone-radius must be in range [0:65535]");
 
 DT_INST_FOREACH_STATUS_OKAY(PINNACLE_DEFINE)

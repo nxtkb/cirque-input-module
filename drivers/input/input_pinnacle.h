@@ -162,7 +162,13 @@ enum pinnacle_absolute_scroll_mode {
 	PINNACLE_ABSOLUTE_SCROLL_NONE,
 	PINNACLE_ABSOLUTE_SCROLL_VERTICAL,
 	PINNACLE_ABSOLUTE_SCROLL_HORIZONTAL,
+	PINNACLE_ABSOLUTE_SCROLL_SPIRAL,
 };
+
+/* Spiral scroll modes used by struct pinnacle_data.spiral_mode */
+#define PINNACLE_ABSOLUTE_SPIRAL_MODE_NONE 0
+#define PINNACLE_ABSOLUTE_SPIRAL_MODE_JOG  1
+#define PINNACLE_ABSOLUTE_SPIRAL_MODE_RIM  2
 
 struct pinnacle_config {
 	const struct pinnacle_bus bus;
@@ -191,6 +197,9 @@ struct pinnacle_config {
 	uint16_t absolute_edge_motion_start_ms;
 	uint16_t absolute_scroll_zone;
 	uint16_t absolute_scroll_divisor;
+	uint16_t absolute_spiral_zone_radius;
+	uint16_t absolute_spiral_deadzone_degrees;
+	uint16_t absolute_spiral_ticks_per_rev;
 
 	bool clipping_enabled;
 	bool scaling_enabled;
@@ -202,6 +211,8 @@ struct pinnacle_config {
 	bool absolute_edge_motion_enabled;
 	bool absolute_right_edge_scroll_enabled;
 	bool absolute_top_edge_scroll_enabled;
+	bool absolute_spiral_jog_enabled;
+	bool absolute_spiral_rim_enabled;
 	bool swap_xy;
 
 	uint16_t active_range_x_min;
@@ -248,6 +259,14 @@ struct pinnacle_data {
 	bool tap_dragging;
 	bool absolute_tap_drag_candidate;
 	bool absolute_motion_started;
+	bool spiral_candidate;
+	bool spiral_engaged;
+	uint8_t spiral_mode;
+	int32_t spiral_prev_angle_mdeg;
+	int32_t spiral_accum_mdeg;
+	int64_t spiral_remainder;
+	int64_t spiral_rim_remainder_x;
+	int64_t spiral_rim_remainder_y;
 	bool relative_mode;
 	const struct device *dev;
 	struct gpio_callback dr_cb_data;
