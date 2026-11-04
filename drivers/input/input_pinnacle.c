@@ -1289,10 +1289,13 @@ static void pinnacle_edge_motion_work_cb(struct k_work *work)
 }
 
 /*
- * Pointer-delta pacing tick. One sample per pad report made the BLE HID
- * stream's cadence follow the pad's raw DR timing (and connection-event
- * drain), so the host saw clusters and gaps -- motion "skipping frames".
- * Coalescing into one REL pair per fixed tick keeps the cadence even.
+ * Pointer-delta pacing: minimum-interval throttle. Samples arriving faster
+ * than the period coalesce into one REL pair per period; samples slower
+ * than the period pass straight through at their own cadence (zero added
+ * latency). A fixed tick here would beat against the pad's DR rate when the
+ * two are close (aliasing: alternating empty/full ticks reads as ~half rate
+ * with unstable gaps). All state is touched only from the system work queue
+ * (DR work and this delayable serialize there).
  */
 #define PINNACLE_MOTION_EMIT_PERIOD_MS 10
 
@@ -1304,6 +1307,7 @@ static void pinnacle_motion_flush_work_cb(struct k_work *work)
 	const struct device *dev = drv_data->dev;
 
 	drv_data->motion_flush_scheduled = false;
+	drv_data->motion_last_emit_ms = k_uptime_get();
 
 	if (drv_data->motion_pending_x == 0 && drv_data->motion_pending_y == 0) {
 		return;
@@ -1317,6 +1321,29 @@ static void pinnacle_motion_flush_work_cb(struct k_work *work)
 	drv_data->motion_pending_y = 0;
 }
 
+/* Accumulate a pointer delta and emit it per the pacing rule. */
+static void pinnacle_motion_accumulate(const struct device *dev, int16_t rel_x, int16_t rel_y)
+{
+	struct pinnacle_data *drv_data = dev->data;
+	int64_t now = k_uptime_get();
+
+	drv_data->motion_pending_x += rel_x;
+	drv_data->motion_pending_y += rel_y;
+
+	if (drv_data->motion_flush_scheduled) {
+		return;
+	}
+
+	int64_t due = drv_data->motion_last_emit_ms + PINNACLE_MOTION_EMIT_PERIOD_MS;
+	if (due <= now) {
+		/* Period already elapsed since the last emission: send now. */
+		k_work_reschedule(&drv_data->motion_flush_work, K_NO_WAIT);
+	} else {
+		k_work_reschedule(&drv_data->motion_flush_work, K_MSEC(due - now));
+	}
+	drv_data->motion_flush_scheduled = true;
+}
+
 /* Emit a coalesced pointer delta immediately (release path); no-op if empty. */
 static void pinnacle_motion_flush_now(const struct device *dev)
 {
@@ -1324,6 +1351,7 @@ static void pinnacle_motion_flush_now(const struct device *dev)
 
 	k_work_cancel_delayable(&drv_data->motion_flush_work);
 	drv_data->motion_flush_scheduled = false;
+	drv_data->motion_last_emit_ms = k_uptime_get();
 
 	if (drv_data->motion_pending_x == 0 && drv_data->motion_pending_y == 0) {
 		return;
@@ -1809,14 +1837,8 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 		drv_data->touch_current_y = sample->abs_y;
 		pinnacle_schedule_absolute_edge_motion(dev);
 
-		/* Pace: accumulate here, one coalesced REL pair per tick. */
-		drv_data->motion_pending_x += rel_x;
-		drv_data->motion_pending_y += rel_y;
-		if (!drv_data->motion_flush_scheduled) {
-			drv_data->motion_flush_scheduled = true;
-			k_work_reschedule(&drv_data->motion_flush_work,
-					  K_MSEC(PINNACLE_MOTION_EMIT_PERIOD_MS));
-		}
+		/* Pace: pass through at the pad's cadence, coalesce if faster. */
+		pinnacle_motion_accumulate(dev, rel_x, rel_y);
 	}
 
 	return 0;

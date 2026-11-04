@@ -291,6 +291,7 @@ struct pinnacle_data {
 	int32_t motion_pending_x;
 	int32_t motion_pending_y;
 	bool motion_flush_scheduled;
+	int64_t motion_last_emit_ms;
 	bool btn_primary;
 	bool btn_secondary;
 	bool btn_aux;
