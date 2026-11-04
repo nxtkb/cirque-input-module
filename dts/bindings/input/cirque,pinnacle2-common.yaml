@@ -131,6 +131,20 @@ properties:
       Height of the lower-right software secondary-tap area in absolute
       coordinates. Set to 0 to disable secondary tap detection.
 
+  absolute-secondary-tap-corner:
+    type: string
+    default: "lower-right"
+    description: |
+      Which raw-coordinate corner the secondary-tap area occupies. Select a
+      different corner when the pad is mounted rotated so the right-click tap
+      zone lands at the physically expected location. The auxiliary-tap zone
+      (upper-left) is unaffected by this setting.
+    enum:
+      - "lower-right"
+      - "lower-left"
+      - "upper-right"
+      - "upper-left"
+
   absolute-aux-tap-area-width:
     type: int
     default: 0
@@ -204,6 +218,65 @@ properties:
     description: |
       Coordinate delta divisor used when converting absolute edge movement to
       wheel ticks. Increase this value to make edge scrolling slower.
+
+  absolute-spiral-jog-enable:
+    type: boolean
+    description: |
+      In absolute mode, treat touches starting inside the spiral zone radius
+      as jog-wheel rotation: angular movement around the pad center emits
+      INPUT_REL_WHEEL ticks proportional to the rotation angle. Rotation
+      suppresses edge motion and pointer movement for those touches. Takes
+      priority over edge scrolling for spiral touches.
+
+  absolute-spiral-rim-enable:
+    type: boolean
+    description: |
+      In absolute mode, treat touches starting outside the spiral zone radius
+      as rim-following rotation: angular movement around the pad center emits
+      wheel ticks following the tangential direction of the rotation.
+      Rotation suppresses edge motion and pointer movement for those
+      touches. Takes priority over edge scrolling for spiral touches.
+
+  absolute-spiral-zone-radius:
+    type: int
+    default: 0
+    description: |
+      Radius from the logical pad center, in logical coordinates, separating
+      jog-wheel touches from rim-following touches. Touches starting inside
+      engage jog-wheel scrolling when absolute-spiral-jog-enable is set;
+      touches starting outside engage rim-following scrolling when
+      absolute-spiral-rim-enable is set. Set to 0 to treat the whole pad as
+      jog-wheel.
+
+  absolute-spiral-zone-invert:
+    type: boolean
+    description: |
+      Invert the ownership of the spiral zone. By default jog-wheel scrolling
+      owns the INSIDE of absolute-spiral-zone-radius and rim-following owns
+      the OUTER ring. With this property set, jog-wheel owns the OUTER ring
+      (rotate near the edge to scroll) and rim-following owns the inner disc;
+      when rim-following is disabled the inner disc stays plain pointer
+      motion.
+
+  absolute-spiral-deadzone-degrees:
+    type: int
+    default: 25
+    description: |
+      Accumulated rotation in degrees required before a spiral touch starts
+      emitting wheel events. Touches rotated less than this still register
+      as taps on lift.
+
+  absolute-spiral-ticks-per-rev:
+    type: int
+    default: 32
+    description: |
+      Number of wheel ticks emitted for one full 360 degree rotation.
+
+  absolute-spiral-invert-wheel:
+    type: boolean
+    description: |
+      Invert the scroll direction of spiral (jog and rim) scrolling relative
+      to the default.
 
   glide-extend-enable:
     type: boolean

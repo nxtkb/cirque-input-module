@@ -176,6 +176,29 @@ Current absolute-mode behavior:
 - `absolute-secondary-tap-area-width`, `absolute-secondary-tap-area-height`,
   `absolute-aux-tap-area-width`, and `absolute-aux-tap-area-height` define
   optional corner tap zones. A width or height of 0 disables that zone.
+- Spiral scroll (absolute mode): `absolute-spiral-jog-enable` treats a touch
+  as a jog-wheel — rotation around the pad center emits wheel ticks
+  (`absolute-spiral-ticks-per-rev` per revolution) and suppresses pointer
+  motion. `absolute-spiral-rim-enable` does the same for touches outside the
+  zone, projecting the rotation onto the wheel axes so direction follows the
+  rim. `absolute-spiral-zone-radius` splits the pad (0 = whole pad is jog).
+  `absolute-spiral-zone-invert` flips that ownership: jog-wheel claims the
+  OUTER ring (rotate near the edge to scroll) and the inner disc is left
+  to rim-following — or to plain pointer motion when rim-following is
+  disabled.
+  A touch only engages after rotating `absolute-spiral-deadzone-degrees`
+  while staying within a radial band (~15% of the starting radius) of the
+  touch-start distance from the center: straight slides drift radially,
+  cancel the gesture, and fall through to normal pointer motion, so taps and
+  drags keep working when the gesture is always on.
+- `absolute-spiral-invert-wheel` flips the spiral scroll direction. Edge
+  scroll strips keep priority at touch start over the spiral gesture, so the
+  outer strips scroll linearly while the rest of the pad jogs.
+- `absolute-secondary-tap-corner` selects which raw-coordinate corner the
+  secondary-tap area occupies: `lower-right` (default), `lower-left`,
+  `upper-right`, or `upper-left`. Pick the corner that matches the physical
+  pad orientation so right-click taps land where expected on rotated
+  mountings; the auxiliary-tap zone (upper-left) is unaffected.
 - `absolute-relative-multiplier` and `absolute-relative-divisor` tune cursor
   scale. Increase the divisor for slower movement; decrease it for faster
   movement.
