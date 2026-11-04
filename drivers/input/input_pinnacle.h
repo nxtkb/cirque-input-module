@@ -284,6 +284,13 @@ struct pinnacle_data {
 	struct gpio_callback dr_cb_data;
 	struct k_work work;
 	struct k_work_delayable edge_motion_work;
+	/* Pointer-delta pacing: deltas accumulate and one coalesced REL pair
+	 * is emitted per fixed tick, giving the BLE HID stream an even cadence
+	 * (clusters/gaps read as cursor "skipping frames" on the host). */
+	struct k_work_delayable motion_flush_work;
+	int32_t motion_pending_x;
+	int32_t motion_pending_y;
+	bool motion_flush_scheduled;
 	bool btn_primary;
 	bool btn_secondary;
 	bool btn_aux;

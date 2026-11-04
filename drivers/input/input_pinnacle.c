@@ -1288,6 +1288,55 @@ static void pinnacle_edge_motion_work_cb(struct k_work *work)
 			  K_MSEC(config->absolute_edge_motion_interval_ms));
 }
 
+/*
+ * Pointer-delta pacing tick. One sample per pad report made the BLE HID
+ * stream's cadence follow the pad's raw DR timing (and connection-event
+ * drain), so the host saw clusters and gaps -- motion "skipping frames".
+ * Coalescing into one REL pair per fixed tick keeps the cadence even.
+ */
+#define PINNACLE_MOTION_EMIT_PERIOD_MS 10
+
+static void pinnacle_motion_flush_work_cb(struct k_work *work)
+{
+	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+	struct pinnacle_data *drv_data = CONTAINER_OF(dwork, struct pinnacle_data,
+						      motion_flush_work);
+	const struct device *dev = drv_data->dev;
+
+	drv_data->motion_flush_scheduled = false;
+
+	if (drv_data->motion_pending_x == 0 && drv_data->motion_pending_y == 0) {
+		return;
+	}
+
+	pinnacle_report_rel(dev, INPUT_REL_X,
+			    CLAMP(drv_data->motion_pending_x, INT16_MIN, INT16_MAX), false);
+	pinnacle_report_rel(dev, INPUT_REL_Y,
+			    CLAMP(drv_data->motion_pending_y, INT16_MIN, INT16_MAX), true);
+	drv_data->motion_pending_x = 0;
+	drv_data->motion_pending_y = 0;
+}
+
+/* Emit a coalesced pointer delta immediately (release path); no-op if empty. */
+static void pinnacle_motion_flush_now(const struct device *dev)
+{
+	struct pinnacle_data *drv_data = dev->data;
+
+	k_work_cancel_delayable(&drv_data->motion_flush_work);
+	drv_data->motion_flush_scheduled = false;
+
+	if (drv_data->motion_pending_x == 0 && drv_data->motion_pending_y == 0) {
+		return;
+	}
+
+	pinnacle_report_rel(dev, INPUT_REL_X,
+			    CLAMP(drv_data->motion_pending_x, INT16_MIN, INT16_MAX), false);
+	pinnacle_report_rel(dev, INPUT_REL_Y,
+			    CLAMP(drv_data->motion_pending_y, INT16_MIN, INT16_MAX), true);
+	drv_data->motion_pending_x = 0;
+	drv_data->motion_pending_y = 0;
+}
+
 static uint16_t pinnacle_absolute_tap_code(const struct device *dev, uint16_t x, uint16_t y)
 {
 	const struct pinnacle_config *config = dev->config;
@@ -1329,6 +1378,7 @@ static void pinnacle_handle_absolute_release(const struct device *dev)
 	}
 
 	k_work_cancel_delayable(&drv_data->edge_motion_work);
+	pinnacle_motion_flush_now(dev);
 
 	if (drv_data->tap_dragging) {
 		pinnacle_report_key(dev, INPUT_BTN_0, false, true);
@@ -1759,8 +1809,14 @@ static int pinnacle_handle_interrupt(const struct device *dev)
 		drv_data->touch_current_y = sample->abs_y;
 		pinnacle_schedule_absolute_edge_motion(dev);
 
-		pinnacle_report_rel(dev, INPUT_REL_X, rel_x, false);
-		pinnacle_report_rel(dev, INPUT_REL_Y, rel_y, true);
+		/* Pace: accumulate here, one coalesced REL pair per tick. */
+		drv_data->motion_pending_x += rel_x;
+		drv_data->motion_pending_y += rel_y;
+		if (!drv_data->motion_flush_scheduled) {
+			drv_data->motion_flush_scheduled = true;
+			k_work_reschedule(&drv_data->motion_flush_work,
+					  K_MSEC(PINNACLE_MOTION_EMIT_PERIOD_MS));
+		}
 	}
 
 	return 0;
@@ -1792,6 +1848,7 @@ int pinnacle_init_interrupt(const struct device *dev)
 	drv_data->dev = dev;
 	drv_data->work.handler = pinnacle_work_cb;
 	k_work_init_delayable(&drv_data->edge_motion_work, pinnacle_edge_motion_work_cb);
+	k_work_init_delayable(&drv_data->motion_flush_work, pinnacle_motion_flush_work_cb);
 
 	/* Configure GPIO pin for HW_DR signal */
 	rc = gpio_is_ready_dt(gpio);
